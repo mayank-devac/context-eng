@@ -4,11 +4,20 @@ Local project memory router for Codex and Claude Code. Memories live in one SQLi
 
 ## Use
 
-Node.js 20 or newer. Run this from an existing project directory, or pass `--project` pointing to one. From a checkout of this repo, `npm install`, `npm run build`, then `npm run init` does the same thing.
+- Requires Node.js 20 or newer.
+- Run the command from within your project repository, not from your home directory.
 
 ```bash
 npx -y context-eng init
+```
+
+```bash
 pnpm dlx context-eng init
+```
+
+To set up a different folder than the one you are in:
+
+```bash
 context-eng init --project /path/to/repo
 ```
 
@@ -28,16 +37,20 @@ flowchart TD
   pick --> codex["~/.codex/config.toml"]
 ```
 
+
+
 You do not start the server yourself. Cursor, Claude Code, or Codex runs `context-eng mcp`. With no `--project`, the server is global until a tool passes `projectPath` or calls `memory_bind`.
 
 ### Project and global
 
 Two different splits:
 
-| | Project | Global |
-| --- | --- | --- |
-| Memory | This repo only, under `~/.context/projects/` | Every repo, under `~/.context/global/` |
-| Instructions | Files inside the repo | Files in your home directory, used by every repo |
+
+|              | Project                                      | Global                                           |
+| ------------ | -------------------------------------------- | ------------------------------------------------ |
+| Memory       | This repo only, under `~/.context/projects/` | Every repo, under `~/.context/global/`           |
+| Instructions | Files inside the repo                        | Files in your home directory, used by every repo |
+
 
 `memory_search` with `filters.scope` `project`, `global`, or `both` chooses the memory side. The files below are the instruction side.
 
@@ -45,16 +58,18 @@ Two different splits:
 
 Instruction files (`AGENTS.md`, `CLAUDE.md`, and the rule files below) keep your other text. `init` replaces only the block between `<!-- context-eng:start -->` and `<!-- context-eng:end -->`. The MCP config files are updated in place and keep other servers.
 
-| File | When | What it does |
-| --- | --- | --- |
-| OS keychain `context-eng` / `typesafe-api-key` | Always | Stores the TypeSafe key for this login |
-| `<project>/AGENTS.md` | Only if that file already exists | Tells Codex, in this repo, to use the memory tools |
-| `<project>/CLAUDE.md` | Only if that file already exists | Tells Claude Code, in this repo, to use the memory tools |
-| `~/.codex/AGENTS.md` | Terminal or `--yes` | Same instructions for every Codex session |
-| `~/.claude/CLAUDE.md` | Claude server added or already matching, or `--claude-only` | Same instructions for every Claude Code project |
-| `~/.cursor/mcp.json` | Cursor selected | Starts the server for every Cursor project. No `--project` |
-| `~/.claude.json` | Claude selected | Same for every Claude Code project. This is the file `claude mcp add --scope user` writes |
-| `~/.codex/config.toml` | Codex selected | Adds `[mcp_servers.context-eng]` only. Codex may later add `[mcp_servers.context-eng.tools.*]` approval lines itself |
+
+| File                                           | When                                                        | What it does                                                                                                         |
+| ---------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| OS keychain `context-eng` / `typesafe-api-key` | Always                                                      | Stores the TypeSafe key for this login                                                                               |
+| `<project>/AGENTS.md`                          | Only if that file already exists                            | Tells Codex, in this repo, to use the memory tools                                                                   |
+| `<project>/CLAUDE.md`                          | Only if that file already exists                            | Tells Claude Code, in this repo, to use the memory tools                                                             |
+| `~/.codex/AGENTS.md`                           | Terminal or `--yes`                                         | Same instructions for every Codex session                                                                            |
+| `~/.claude/CLAUDE.md`                          | Claude server added or already matching, or `--claude-only` | Same instructions for every Claude Code project                                                                      |
+| `~/.cursor/mcp.json`                           | Cursor selected                                             | Starts the server for every Cursor project. No `--project`                                                           |
+| `~/.claude.json`                               | Claude selected                                             | Same for every Claude Code project. This is the file `claude mcp add --scope user` writes                            |
+| `~/.codex/config.toml`                         | Codex selected                                              | Adds `[mcp_servers.context-eng]` only. Codex may later add `[mcp_servers.context-eng.tools.*]` approval lines itself |
+
 
 `<project>` is `--project`, or the current directory when you omit it. It must already exist. Running `init` from `~` uses your home directory as `<project>`. It does not create `~/AGENTS.md` or `~/CLAUDE.md` when those files are absent. Claude's user-level MCP server is in `~/.claude.json`; `init` does not create a project `.mcp.json`.
 
@@ -69,11 +84,13 @@ context-eng init --cursor-only --project /path/to/repo
 context-eng init --claude-only --scope both --project /path/to/repo
 ```
 
-| Command | Global file | Project file |
-| --- | --- | --- |
-| `--codex-only` | `~/.codex/AGENTS.md` | none |
+
+| Command         | Global file                              | Project file                                     |
+| --------------- | ---------------------------------------- | ------------------------------------------------ |
+| `--codex-only`  | `~/.codex/AGENTS.md`                     | none                                             |
 | `--cursor-only` | `~/.cursor/rules/context-eng-memory.mdc` | `<project>/.cursor/rules/context-eng-memory.mdc` |
-| `--claude-only` | `~/.claude/CLAUDE.md` | `<project>/.claude/rules/context-eng-memory.md` |
+| `--claude-only` | `~/.claude/CLAUDE.md`                    | `<project>/.claude/rules/context-eng-memory.md`  |
+
 
 `--scope` is `global`, `project`, or `both`. With no `--project`, scope defaults to `global`. With `--project` and no `--scope`, scope defaults to `project`. `project` and `both` need `--project`.
 
@@ -270,3 +287,4 @@ npm run lint
 ## Related docs
 
 - [Memory tool rules](system_prompts/rules.md) — agent contract for bind, search, write, promote, and delete
+

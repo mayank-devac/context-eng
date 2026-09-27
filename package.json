@@ -5,6 +5,10 @@
   "type": "module",
   "license": "MIT",
   "author": "mayank",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mayank-devac/context-eng.git"
+  },
   "bin": {
     "context-eng": "./dist/cli-entry.js"
   },
