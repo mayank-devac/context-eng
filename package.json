@@ -1,0 +1,47 @@
+{
+  "name": "context-eng",
+  "version": "0.1.0",
+  "description": "Local Project Memory Router for Codex and Claude Code: SQLite + FTS5 behind MCP tools.",
+  "type": "module",
+  "license": "MIT",
+  "author": "mayank",
+  "bin": {
+    "context-eng": "./dist/cli-entry.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "system_prompts"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json",
+    "mcp": "tsx src/cli-entry.ts mcp",
+    "init": "tsx src/cli-entry.ts init",
+    "inspect:search": "tsx src/inspect-cli.ts",
+    "start": "node dist/cli-entry.js mcp",
+    "test": "vitest run",
+    "lint": "eslint src test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@napi-rs/keyring": "^1.3.0",
+    "better-sqlite3": "^13.0.3",
+    "zod": "^4.6.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.5.1",
+    "eslint": "^10.10.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^5.0.0"
+  }
+}

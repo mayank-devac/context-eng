@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.context/
+.DS_Store
+docs/
+.mcp.json
+docs/plan_stages
