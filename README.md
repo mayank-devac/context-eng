@@ -1,4 +1,4 @@
-# context-eng
+# context-eng 
 
 Local project memory router for Codex and Claude Code. Memories live in one SQLite database per each category, with SQLite FTS5 for local retrieval and TypeSafe Jev filtering for semantic relevance.
 
