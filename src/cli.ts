@@ -55,12 +55,11 @@ const USAGE = `Usage:
   context-eng recall --query <text> [--project <path>] [--scope global|project|both] [--limit <1-50>] [--local]
   context-eng init [--project <path>] [--yes]
   context-eng init --recall manual|automatic|off [--harness claude|codex] [--scope global|project] [--project <path>] [--local] [--yes]
-  context-eng init --postsession on|off [--harness claude|codex] [--scope global|project] [--project <path>] [--yes]
+  context-eng init --postsession manual|off [--harness claude|codex] [--scope global|project] [--project <path>] [--yes]
   context-eng init --codex-only
   context-eng init --cursor-only [--scope global|project|both] [--project <path>]
   context-eng init --claude-only [--scope global|project|both] [--project <path>]
   context-eng hook --harness claude|codex --mode manual|automatic [--project <path>] [--local]
-  context-eng postsession --harness claude|codex [--project <path>]
 `;
 
 interface CliOptions {
@@ -322,7 +321,7 @@ export async function promptHookSetup(
       else if (answer === "o" || answer === "off") recall = "off";
       else log("Choose manual, automatic, or off.");
     }
-    const postsession = await ask("Enable post-session memory saving? [y/N] ");
+    const postsession = await ask("Install manual postsession saving ($postsession in Codex, /postsession in Claude)? [y/N] ");
     return { recall, postsession: /^y(?:es)?$/i.test(postsession.trim()) };
   } finally {
     prompt?.close();
@@ -364,15 +363,17 @@ async function configureMemoryHooks(
     const files = setup.kind === "recall"
       ? installRecallHooks({ ...common, mode: setup.mode, ...(values.local === undefined ? {} : { local: values.local }) }).files
       : installPostsessionHook({ ...common, enabled: setup.enabled });
-    const mode = setup.kind === "recall" ? setup.mode : setup.enabled ? "on" : "off";
+    const mode = setup.kind === "recall" ? setup.mode : setup.enabled ? "manual" : "off";
     console.log(`${id} ${setup.kind}: ${mode}${files.length ? "" : " (unchanged)"}`);
     for (const file of files) console.log(`  ${file}`);
   }
   if (!disabled) {
-    console.log("Restart the selected host. In Codex, review and trust the hook using /hooks.");
+    console.log(setup.kind === "recall"
+      ? "Restart the selected host. In Codex, review and trust the hook using /hooks."
+      : "Restart the selected host to load the postsession skill and reload any removed Stop hook.");
     console.log(setup.kind === "recall"
       ? "Manual recall: /recall <topic> in Claude, or $recall <topic> in Codex."
-      : "Postsession needs memory_create and memory_promote connected and permitted in the host. Saved notes become searchable immediately.");
+      : "Manual saving: $postsession in Codex or /postsession in Claude. Requires connected, permitted memory tools; Saved is reported only after confirmed creation/promotion.");
   }
 }
 
@@ -443,7 +444,7 @@ export async function main(): Promise<void> {
     }
     if (!values.harness) throw new Error("postsession requires --harness claude or codex");
     parseRecallHarness(values.harness);
-    await runPostsessionHook(values.project === undefined ? undefined : resolveProjectPath(values.project));
+    await runPostsessionHook();
     return;
   }
   if (values["context-eng-postsession"] !== undefined) throw new Error("--context-eng-postsession is only supported by postsession");
@@ -466,7 +467,9 @@ export async function main(): Promise<void> {
   }
   if (values.recall !== undefined && values.postsession !== undefined) throw new Error("Configure recall and postsession separately");
   if (command === "init" && values.postsession !== undefined) {
-    await configureMemoryHooks(values, { kind: "postsession", enabled: parsePostsessionMode(values.postsession) });
+    const enabled = parsePostsessionMode(values.postsession);
+    if (values.postsession === "on") console.log("--postsession on is deprecated; installing manual postsession. Use --postsession manual.");
+    await configureMemoryHooks(values, { kind: "postsession", enabled });
     return;
   }
   if (command === "init" && values.recall !== undefined) {

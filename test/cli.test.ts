@@ -49,7 +49,11 @@ describe.skipIf(process.platform === "win32")("promptHookSetup", () => {
   });
 
   it("collects recall and post-session choices after hook installation is accepted", async () => {
-    const { result } = await hookPrompt("yes\nautomatic\nyes\n");
+    const questions: string[] = [];
+    const pending = ["yes", "automatic", "yes"];
+    const result = await promptHookSetup({ ask: async (question) => { questions.push(question); return pending.shift()!; } });
+    expect(questions.at(-1)).toContain("manual postsession");
+    expect(questions.at(-1)).toContain("$postsession");
     expect(result).toEqual({ recall: "automatic", postsession: true });
   });
 

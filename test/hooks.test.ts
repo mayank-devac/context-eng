@@ -193,7 +193,9 @@ describe("prompt recall hooks", () => {
     const marker = path.join(root, "should-not-exist");
     const result = spawnSync(process.execPath, [TSX, path.join(REPO, "src/cli-entry.ts"), "hook", "--harness", "codex", "--mode", "automatic", "--local"], {
       env: { ...process.env, CONTEXT_ENG_HOME: home },
-      input: JSON.stringify(event(`Fix login $(touch ${marker})`)), encoding: "utf8", timeout: 10_000,
+      // Keep retrieval independent of how many words the OS temporary path contains.
+      input: JSON.stringify(event("login secure cookies $(touch should-not-exist)")),
+      cwd: root, encoding: "utf8", timeout: 10_000,
     });
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");

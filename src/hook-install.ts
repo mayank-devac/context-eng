@@ -178,7 +178,7 @@ interface FileSnapshot {
   linkTarget?: string;
 }
 
-interface FileChange {
+export interface FileChange {
   file: string;
   content: string | null;
 }
@@ -278,11 +278,20 @@ export function installRecallHooks(options: RecallInstallOptions): RecallInstall
   const configChange = nextConfig !== existing && nextConfig !== null
     ? { file: locations.config, content: nextConfig }
     : undefined;
-  if (configChange) active ? changes.push(configChange) : changes.unshift(configChange);
+  if (configChange) {
+    if (active) changes.push(configChange);
+    else changes.unshift(configChange);
+  }
+  applyInstallChanges(changes, "Recall hook", options.fileOps);
+  return { harness: options.harness, mode: options.mode, files: changes.map((change) => change.file) };
+}
+
+/** Shared transaction for owned skill files and their host configuration. */
+export function applyInstallChanges(changes: FileChange[], label: string, overrides?: Partial<RecallInstallFileOps>): void {
   const fileOps: RecallInstallFileOps = {
-    write: options.fileOps?.write ?? writeConfigAtomically,
-    remove: options.fileOps?.remove ?? unlinkSync,
-    symlink: options.fileOps?.symlink ?? symlinkSync,
+    write: overrides?.write ?? writeConfigAtomically,
+    remove: overrides?.remove ?? unlinkSync,
+    symlink: overrides?.symlink ?? symlinkSync,
   };
   const snapshots = new Map(changes.map((change) => [change.file, snapshotFile(change.file)]));
   const completed: FileChange[] = [];
@@ -296,7 +305,6 @@ export function installRecallHooks(options: RecallInstallOptions): RecallInstall
     const message = error instanceof Error ? error.message : String(error);
     const rollbackProblems = rollbackChanges(completed, snapshots, fileOps);
     const rollback = rollbackProblems.length ? ` Rollback: ${rollbackProblems.join("; ")}` : " Rollback restored completed files.";
-    throw new Error(`Recall hook installation failed (${message}).${rollback}`, { cause: error });
+    throw new Error(`${label} installation failed (${message}).${rollback}`, { cause: error });
   }
-  return { harness: options.harness, mode: options.mode, files: changes.map((change) => change.file) };
 }

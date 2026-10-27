@@ -21,7 +21,7 @@
 - `src/cli.ts`:
   - Use: Implements `context-eng mcp`, `init`, `recall`, and the host-facing `hook` entry point without auto-running on import.
   - Useful/used by: `cli-entry.ts` calls `main`; init validates the project, writes agent pointers, selects clients, and invokes `harness.ts` to register their servers.
-  - Contains: Argument parsing, usage validation, marked-block insertion/replacement, project initialization, global Codex and Claude pointers, client selection, conflict confirmation, an interactive prompt-box-hook wizard, terminal recall, and manual/automatic/off hook setup with host/scope validation.
+  - Contains: Argument parsing, usage validation, marked-block insertion/replacement, project initialization, global Codex and Claude pointers, client selection, conflict confirmation, an interactive recall/manual-saving wizard, terminal recall, manual/automatic/off recall setup, manual/off postsession setup with a deprecated on alias, and host/scope validation.
 
 - `src/hooks.ts`:
   - Use: Retrieves context before Codex or Claude processes a submitted prompt.
@@ -30,13 +30,13 @@
 
 - `src/hook-install.ts`:
   - Use: Installs, updates, and removes the owned prompt-box skills and UserPromptSubmit handlers.
-  - Useful/used by: `cli.ts` dispatches recall-only init; hook/installer tests use isolated homes and projects.
+  - Useful/used by: `cli.ts` dispatches recall init; `postsession.ts` reuses the installation transaction; hook/installer tests use isolated homes and projects.
   - Contains: JSON-preserving command-hook merges for UserPromptSubmit/Stop, owned-file snapshots with reverse rollback and concurrent-edit conflict reporting, separate ownership markers, conflict checks, global/project layouts, safely quoted durable runtime commands, source-checkout loaders, and temporary-cache rejection.
 
 - `src/postsession.ts`:
-  - Use: Requests one final memory-saving pass from the current host model when a task response ends.
-  - Useful/used by: `cli.ts` dispatches the postsession handler and independent on/off setup; `hook-install.ts` supplies shared command/configuration helpers.
-  - Contains: Stop-event validation, stop_hook_active loop guard, explicit project binding instructions, immediate-searchability guidance via create/promote tools, non-blocking JSON errors, and owned Stop-handler installation/removal. Prompt instructions ship in `system_prompts/postsession.md`.
+  - Use: Installs explicit-only postsession skills and migrates legacy automatic saving.
+  - Useful/used by: `cli.ts` dispatches manual/off setup and the legacy no-op handler; `hook-install.ts` supplies shared transactions and configuration helpers.
+  - Contains: Owned skill installation/removal with project binding, explicit-only host metadata, deliberate cleanup of legacy owned Stop handlers, and a non-blocking compatibility handler. Shared saving instructions ship in `system_prompts/postsession.md` and are rendered into host templates under `system_prompts/postsession/`.
 
 - `src/cli-entry.ts`:
   - Use: Executable entry point for the package and npm scripts.

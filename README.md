@@ -150,20 +150,20 @@ node --import tsx src/cli-entry.ts init --recall manual --harness codex --scope 
 
 Use the commands in each real host's prompt box with a topic already stored for that test project. Check hook delivery in the host's hook/debug view and verify the first response has the memory without a `memory_search` call. Switch to automatic mode and submit two different topics in succession to verify recall runs before both prompts. Finally disable the project integration and check unrelated hooks remain.
 
-To configure both hooks for this checkout in Codex, run these commands from the repository root:
+To configure recall and manual saving for this checkout in Codex, run these commands from the repository root:
 
 ```sh
 node --import tsx src/cli-entry.ts init --recall automatic --harness codex --scope project --project . --local
-node --import tsx src/cli-entry.ts init --postsession on --harness codex --scope project --project .
+node --import tsx src/cli-entry.ts init --postsession manual --harness codex --scope project --project .
 ```
 
-This creates `.codex/hooks.json` with `UserPromptSubmit` for recall and `Stop` for the memory-saving pass. It also installs `.agents/skills/recall/SKILL.md` and `.agents/skills/recall/agents/openai.yaml`. These generated hooks use absolute paths to the local Node executable and checkout. Recall uses local word matching in this test setup. Postsession uses the working model and requires the context-eng `memory_create` and `memory_promote` tools to be connected and permitted.
+This creates `.codex/hooks.json` with `UserPromptSubmit` for recall and installs `.agents/skills/recall/` and `.agents/skills/postsession/`. Manual postsession has no hook. Its setup removes any legacy context-eng Stop handler in the selected scope, while preserving recall and unrelated Stop handlers. Recall's generated hook uses absolute paths to the local Node executable and checkout. Postsession uses the working model and requires connected, permitted context-eng memory tools.
 
-1. Restart Codex or reopen the project. Open `/hooks` and review/trust both hook definitions. Project hooks also require project trust.
+1. Restart Codex or reopen the project. Open `/hooks` and review/trust the recall hook. Project hooks also require project trust.
 2. In this project, use the memory tools to save one known note, such as `The project test colour is violet.`, and confirm it is searchable. A fact mentioned only in chat is not yet a saved context-eng memory.
 3. Open a fresh chat in the same project and type `$recall test colour`. The saved note should appear with its metadata, and the agent should wait. There should be no `memory_search` call before that first reply.
 4. Open another fresh chat and ask `What is the project test colour?`. Automatic recall should supply the note before the first answer, without a model-triggered search for that answer.
-5. For postsession, finish a task that establishes one new durable fact. Confirm that the Stop hook gives the working model one final save pass. If the fact was already saved during the task, a no-op is correct. Otherwise, check the memory-tool result and any required promotion, then retrieve the fact in a fresh chat. A lookup during this later saving pass is separate from the before-answer recall check.
+5. In an isolated test project/store, establish one new durable fact and explicitly invoke `$postsession`. Inspect the actual create/promote results, then retrieve the fact in a fresh chat or independent lookup. Check a duplicate and a conversation with no useful learning: both should report `Nothing new worth saving`. Disconnect the tools and check `Could not save` names the missing tool. A staged note whose promotion fails must be reported as still in staging and not searchable by normal recall. An ordinary prompt must not start a saving pass. Text assertions in automated tests do not prove these live model behaviours.
 
 For Claude Code, replace `--harness codex` with `--harness claude` in the two setup commands, restart Claude Code, and use `/recall test colour` in its prompt box. Claude project setup uses `.claude/settings.local.json` and `.claude/skills/recall/SKILL.md`.
 
@@ -176,30 +176,41 @@ npm run typecheck:test
 npm test -- test/hooks.test.ts test/hook-install.test.ts test/engine.test.ts test/recall.test.ts test/mcp.test.ts
 ```
 
-## Save a memory when a task finishes
+## Save a learning manually
 
-The optional `postsession` hook uses the host's `Stop` event while the current model still has the conversation. It asks that same working model to make one final saving pass. It does not launch another model or call a summarisation API.
-
-To try it from this unpublished checkout for the current project:
+Enable the postsession skill for a project from a durable installation:
 
 ```sh
-node --import tsx src/cli-entry.ts init --postsession on --harness codex --scope project --project .
+context-eng init --postsession manual --harness codex --scope project --project /path/to/repo
 ```
 
-Use `--harness claude` for Claude Code. Restart the host and, in Codex, review/trust the hook using `/hooks`. After a release containing this feature is installed durably, the equivalent command is `context-eng init --postsession on`. Use `--postsession off` with the same host/scope/project flags to remove just this hook; recall and other Stop handlers are preserved.
+Restart Codex, then type `$postsession` or select the postsession skill. In Claude Code, install with `--harness claude`, restart, and type `/postsession`. Native skill invocation uses the current conversation and model. It does not read transcripts or call another model. Ordinary prompts do not invoke it. Codex uses `policy.allow_implicit_invocation: false` in `agents/openai.yaml`; Claude uses `disable-model-invocation: true` in `SKILL.md` ([Codex documentation](https://learn.chatgpt.com/docs/build-skills), [Claude documentation](https://code.claude.com/docs/en/skills)).
 
-The host must have context-eng `memory_create` and `memory_promote` connected and permitted. Ordinary `context-eng init` handles MCP setup if needed. The saving pass checks whether the task is complete and whether a useful, verified claim was learned. It skips duplicates, secrets, temporary status, guesses, and tasks that forbid saving. It defaults to project scope and considers at most one new claim. When creation leaves that claim in staging, the model must promote it and confirm success before reporting it searchable.
+Project setup writes `.agents/skills/postsession/SKILL.md` and `agents/openai.yaml` for Codex, or `.claude/skills/postsession/SKILL.md` for Claude. Project skills derive the absolute project root from that installed skill's location, including when invoked from nested directories; they contain no machine-specific root. `--scope global` installs under your home instead; the skill must resolve the current project's root before writing. Skill-only setup adds no UserPromptSubmit or Stop handler and needs no hook trust approval. Restarting also reloads any removed Stop handler; recall retains its own hook trust requirements.
 
-This is a model-guided save, not a guaranteed database write. Missing tools, denied permissions, or a failed promotion are reported rather than bypassed. There is one extra model continuation, using the host's normal quota. If another Stop continuation is already active, `stop_hook_active` prevents chaining another save pass. Other Stop policies can also prevent continuation. The hook judges completion through the working model because a finished response can be a clarification or partial result. Closing or killing the host before this pass completes can prevent saving.
+The skill considers at most one useful new claim, skips duplicates, secrets, guesses and temporary progress, and respects more specific no-saving or scope restrictions. It defaults to project memory. It searches narrowly for duplicates when needed and uses an existing category. Results are brief:
 
-The handler reads only the bounded hook input, not the session transcript. Invalid input lets the task finish. The focused checks for this feature and the shared recall installer are:
+- `Saved: <claim>` means the tool confirmed the note is searchable.
+- `Nothing new worth saving` means no suitable new claim was found or it was already stored.
+- `Could not save: <reason>` names a missing tool, denied permission, unclear binding or failed write. If creation succeeded but promotion failed, it says the note remains in staging and normal recall cannot find it.
+
+The host needs connected and permitted context-eng memory tools, including `memory_create` and `memory_promote` when promotion is required. Ordinary `context-eng init` configures MCP if needed. Missing tools are reported; the skill never bypasses them by writing database files. This is a model-guided workflow: a local skill file alone does not prove the running host loaded it or saved anything.
+
+### Migrate from 0.1.2
+
+After updating the package, run the manual setup command above with the **same host, scope and project flags** as your old postsession installation. It installs the owned manual skill and removes only that installation's legacy context-eng Stop handler. The old `--postsession on` spelling remains a deprecated alias for `manual`. Old Stop commands against the updated executable return `{}` and cannot block an answer. An old executable still needs updating or its hook needs deliberate migration. Setup never migrates other hosts/scopes or runs automatically at package startup.
+
+Use `--postsession off` with the same flags to remove the owned skill and any legacy owned Stop handler. User-owned conflicting skills, recall, other Stop handlers and unrelated settings are preserved. Malformed hook configuration is left unchanged. Migration uses the same snapshots and rollback protection as recall: on failure it restores the prior contents of completed file changes and removes files newly created by that attempt. Concurrent edits or redirected symbolic links are preserved and reported as rollback conflicts.
+
+For source-checkout setup, use `node --import tsx src/cli-entry.ts init --postsession manual` with the same flags. The focused automated checks are:
 
 ```sh
 npm run typecheck:test
-npm test -- test/postsession.test.ts test/hook-install.test.ts
+npm test -- test/cli.test.ts test/postsession.test.ts test/hook-install.test.ts test/hooks.test.ts test/recall.test.ts
+npm run lint
 ```
 
-Live-host verification still needs an isolated Codex/Claude session with connected memory tools: complete a task with a new known fact, check that its memory is searchable, and verify that the saving pass stops rather than looping. Also check a task with no new learning creates nothing. These unit tests verify the protocol and configuration, not a real model's judgement or memory-tool execution.
+These checks cover installation, migration, rollback, legacy compatibility and instruction/metadata contracts. A real Codex/Claude create → promote → independent retrieval flow still requires the isolated live-host check described above; unit tests cannot prove model judgement or tool execution.
 
 ## Recall memories from a terminal
 
