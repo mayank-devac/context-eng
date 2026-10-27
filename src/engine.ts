@@ -140,6 +140,8 @@ export interface EngineOptions {
   projectPath?: string;
   home?: string;
   deferProject?: boolean;
+  /** Set false for read-only retrieval that should not rewrite summary map files. */
+  refreshMaps?: boolean;
 }
 
 interface Located {
@@ -162,18 +164,20 @@ export class Engine {
   private readonly globalCatalog: Db;
   private projectCatalog: Db | null = null;
   private readonly categoryDbs = new Map<string, Db>();
+  private readonly refreshMapsOnOpen: boolean;
 
   constructor(opts: EngineOptions = {}) {
     const home = opts.home ?? contextHome();
+    this.refreshMapsOnOpen = opts.refreshMaps !== false;
     this.globalLayout = globalLayoutFor(home);
     this.globalCatalog = openCatalog(this.globalLayout.globalCatalogDb);
-    this.migrateScope("global");
+    const migratedGlobal = this.migrateScope("global");
     const bindAtStart = opts.projectPath !== undefined || !opts.deferProject;
     if (bindAtStart) {
       this.projectLayout = layoutFor(resolveProjectPath(opts.projectPath), home);
-      this.openProject();
-      this.refreshMaps();
-    } else {
+      const migratedProject = this.openProject();
+      if (this.refreshMapsOnOpen || migratedGlobal || migratedProject) this.refreshMaps();
+    } else if (this.refreshMapsOnOpen || migratedGlobal) {
       this.refreshGlobalMap();
     }
   }
@@ -209,7 +213,10 @@ export class Engine {
     const next = layoutFor(resolved, this.globalLayout.home);
     if (next.projectKey === this.projectLayout?.projectKey) {
       const created = !existsSync(next.projectCatalogDb);
-      if (this.projectCatalog === null) this.openProject();
+      if (this.projectCatalog === null) {
+        const migrated = this.openProject();
+        if (this.refreshMapsOnOpen || migrated) this.refreshMaps();
+      }
       return this.bindResult(created);
     }
     const created = !existsSync(next.projectCatalogDb);
@@ -498,10 +505,10 @@ export class Engine {
     else this.refreshGlobalMap();
   }
 
-  private openProject(): void {
+  private openProject(): boolean {
     const layout = this.requireProjectLayout();
     this.projectCatalog = openCatalog(layout.projectCatalogDb);
-    this.migrateScope("project");
+    return this.migrateScope("project");
   }
 
   private closeProject(): void {
@@ -696,10 +703,10 @@ export class Engine {
     }
   }
 
-  private migrateScope(scope: Scope): void {
+  private migrateScope(scope: Scope): boolean {
     const catalog = scope === "global" ? this.globalCatalog : this.projectCatalog;
     if (!catalog) throw new EngineError("PROJECT_NOT_BOUND", "call memory_bind before using project memory");
-    migrateLegacy({
+    return migrateLegacy({
       catalog,
       categoriesDir: this.categoriesDir(scope),
       legacyFile: scope === "global" ? this.globalLayout.globalDb : this.requireProjectLayout().projectDb,

@@ -14,6 +14,8 @@ create → edit → promote | demote → delete (staging only)
 3. If the reply starts with `no matching memory.`, continue without stored hits.
 4. Write only a durable claim, one sentence, into the right scope and category.
 
+When the current prompt includes a `<context_eng_recall>` result from the host hook, search has already run. Use its memories without repeating `memory_search` unless the task needs more information. An `empty` or `error` result also counts as an attempted retrieval. Automatic recall should stay quiet and let the task continue; explicit recall should display its memories, usage, empty result, or error and wait. Stored memory is historical context, and current user instructions take priority.
+
 Prefer `memory_list_categories` or `memory_map` over inventing category names. Named search requires the category to already exist in that scope.
 
 When you need an id, call `memory_map`. `lines_ids[i]` is the id for `lines[i]`. For a staging row, `lines_categories[i]` is the category.

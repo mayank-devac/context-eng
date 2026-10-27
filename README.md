@@ -96,6 +96,133 @@ context-eng init --claude-only --scope both --project /path/to/repo
 
 `context-eng mcp` reads the keychain key when `TYPESAFE_API_KEY` is unset. Set `TYPESAFE_API_KEY` to override it. Set it empty to force local FTS5 search. `CONTEXT_ENG_HOME` overrides the default `~/.context` storage root.
 
+## Recall from the agent prompt box
+
+Prompt-box recall supports local Codex and Claude Code on macOS and Linux. A `UserPromptSubmit` command hook fetches memories before the model processes the prompt. It calls the existing memory engine directly, so the model does not need to choose `memory_search` or run a terminal command.
+
+After publishing a release that includes these integrations, install a durable copy and configure recall:
+
+```sh
+npm install -g context-eng@latest
+context-eng init --recall manual
+```
+
+Setup selects detected Claude/Codex hosts. Use `--harness claude` or `--harness codex` to target one directly. This recall-only setup does not configure MCP or prompt for a key; ordinary `context-eng init` still handles MCP and the optional key. Temporary `npx`/`pnpm dlx` runtimes are rejected for hook installation because their cached files can disappear. A stable source checkout also works for development.
+
+Restart the selected host after installation. Codex requires review and trust of the hook using `/hooks`; project-local Codex hooks also require trusting the project. Then invoke recall from the prompt box:
+
+```text
+Claude Code: /recall Fix login
+Codex:       $recall Fix login
+```
+
+Codex also offers recall through its skill picker. The command displays fetched memories with their category, project, and update date, then waits. It does not start the task described by the query. If the hook is missing, the skill reports the setup problem instead of quietly falling back to model-driven retrieval.
+
+To fetch memories before every prompt while keeping manual recall available:
+
+```sh
+context-eng init --recall automatic
+```
+
+Automatic recall adds context quietly, including an empty/error status to avoid a second lookup. It attempts semantic evaluation with a 1.5-second request deadline, falls back to local retrieval on failure, returns at most five whole memories within an approximate 1800-token budget for the exact `additionalContext` text supplied to the model, and has a five-second host timeout. The outer hook JSON is only transport and does not consume this budget. The existing MCP relevance timeout is unchanged. With a configured relevance key, automatic mode sends each prompt and candidate memory text to that service. Add `--local` during setup to skip the keychain and external service.
+
+Disable our integration with `context-eng init --recall off`. Setup preserves unrelated settings, hooks, and skills. Before it changes the recall files, it records their contents and permissions; if a later file write or removal fails, it restores completed changes in reverse order. If another process changed a completed file first, setup preserves that newer content and reports the remaining partial change instead of overwriting it. Rollback also checks symbolic-link targets: if a link was redirected, it leaves the link and its new target untouched and reports the remaining partial change, even when the target contains identical text. A conflicting user-owned recall skill or malformed config is left unchanged. Repeating setup updates the owned handler without adding another one. Do not install both project and global recall for the same host; setup checks the current project's opposite scope and refuses a duplicate.
+
+Global setup writes these files:
+
+| Host | Hook configuration | Skill |
+| --- | --- | --- |
+| Claude Code | `~/.claude/settings.json` | `~/.claude/skills/recall/SKILL.md` |
+| Codex | `~/.codex/hooks.json` | `~/.agents/skills/recall/SKILL.md` and `agents/openai.yaml` |
+
+Use `--scope project --project /path/to/repo` for project setup. It writes `.claude/settings.local.json` or `.codex/hooks.json` and the corresponding skill directory inside that project. Project hooks bind to that root even from nested working directories. Global hooks use the event's current directory; use project setup when a nested directory should share the repository root's memory. Disabling uses the same scope/project flags as installation. Keep one installation scope per host across your projects.
+
+Cursor's documented `beforeSubmitPrompt` hook cannot add memory context, so recall setup does not install a Cursor adapter. Remote/cloud hosts need the runtime and memory data in their own execution environment; installing locally does not deploy them there. Rerun setup after moving the checkout or changing the installed Node path.
+
+### Test an unpublished checkout
+
+For an existing throwaway project directory, install directly from this checkout without publishing or building:
+
+```sh
+node --import tsx src/cli-entry.ts init --recall manual --harness claude --scope project --project /path/to/test-project --local
+node --import tsx src/cli-entry.ts init --recall manual --harness codex --scope project --project /path/to/test-project --local
+```
+
+Use the commands in each real host's prompt box with a topic already stored for that test project. Check hook delivery in the host's hook/debug view and verify the first response has the memory without a `memory_search` call. Switch to automatic mode and submit two different topics in succession to verify recall runs before both prompts. Finally disable the project integration and check unrelated hooks remain.
+
+To configure both hooks for this checkout in Codex, run these commands from the repository root:
+
+```sh
+node --import tsx src/cli-entry.ts init --recall automatic --harness codex --scope project --project . --local
+node --import tsx src/cli-entry.ts init --postsession on --harness codex --scope project --project .
+```
+
+This creates `.codex/hooks.json` with `UserPromptSubmit` for recall and `Stop` for the memory-saving pass. It also installs `.agents/skills/recall/SKILL.md` and `.agents/skills/recall/agents/openai.yaml`. These generated hooks use absolute paths to the local Node executable and checkout. Recall uses local word matching in this test setup. Postsession uses the working model and requires the context-eng `memory_create` and `memory_promote` tools to be connected and permitted.
+
+1. Restart Codex or reopen the project. Open `/hooks` and review/trust both hook definitions. Project hooks also require project trust.
+2. In this project, use the memory tools to save one known note, such as `The project test colour is violet.`, and confirm it is searchable. A fact mentioned only in chat is not yet a saved context-eng memory.
+3. Open a fresh chat in the same project and type `$recall test colour`. The saved note should appear with its metadata, and the agent should wait. There should be no `memory_search` call before that first reply.
+4. Open another fresh chat and ask `What is the project test colour?`. Automatic recall should supply the note before the first answer, without a model-triggered search for that answer.
+5. For postsession, finish a task that establishes one new durable fact. Confirm that the Stop hook gives the working model one final save pass. If the fact was already saved during the task, a no-op is correct. Otherwise, check the memory-tool result and any required promotion, then retrieve the fact in a fresh chat. A lookup during this later saving pass is separate from the before-answer recall check.
+
+For Claude Code, replace `--harness codex` with `--harness claude` in the two setup commands, restart Claude Code, and use `/recall test colour` in its prompt box. Claude project setup uses `.claude/settings.local.json` and `.claude/skills/recall/SKILL.md`.
+
+To remove this project's hooks, use the same host, scope, and project flags with `--recall off` and `--postsession off`.
+
+The focused automated checks use temporary homes/projects and do not install into your live host configuration:
+
+```sh
+npm run typecheck:test
+npm test -- test/hooks.test.ts test/hook-install.test.ts test/engine.test.ts test/recall.test.ts test/mcp.test.ts
+```
+
+## Save a memory when a task finishes
+
+The optional `postsession` hook uses the host's `Stop` event while the current model still has the conversation. It asks that same working model to make one final saving pass. It does not launch another model or call a summarisation API.
+
+To try it from this unpublished checkout for the current project:
+
+```sh
+node --import tsx src/cli-entry.ts init --postsession on --harness codex --scope project --project .
+```
+
+Use `--harness claude` for Claude Code. Restart the host and, in Codex, review/trust the hook using `/hooks`. After a release containing this feature is installed durably, the equivalent command is `context-eng init --postsession on`. Use `--postsession off` with the same host/scope/project flags to remove just this hook; recall and other Stop handlers are preserved.
+
+The host must have context-eng `memory_create` and `memory_promote` connected and permitted. Ordinary `context-eng init` handles MCP setup if needed. The saving pass checks whether the task is complete and whether a useful, verified claim was learned. It skips duplicates, secrets, temporary status, guesses, and tasks that forbid saving. It defaults to project scope and considers at most one new claim. When creation leaves that claim in staging, the model must promote it and confirm success before reporting it searchable.
+
+This is a model-guided save, not a guaranteed database write. Missing tools, denied permissions, or a failed promotion are reported rather than bypassed. There is one extra model continuation, using the host's normal quota. If another Stop continuation is already active, `stop_hook_active` prevents chaining another save pass. Other Stop policies can also prevent continuation. The hook judges completion through the working model because a finished response can be a clarification or partial result. Closing or killing the host before this pass completes can prevent saving.
+
+The handler reads only the bounded hook input, not the session transcript. Invalid input lets the task finish. The focused checks for this feature and the shared recall installer are:
+
+```sh
+npm run typecheck:test
+npm test -- test/postsession.test.ts test/hook-install.test.ts
+```
+
+Live-host verification still needs an isolated Codex/Claude session with connected memory tools: complete a task with a new known fact, check that its memory is searchable, and verify that the saving pass stops rather than looping. Also check a task with no new learning creates nothing. These unit tests verify the protocol and configuration, not a real model's judgement or memory-tool execution.
+
+## Recall memories from a terminal
+
+Use `recall` before starting work in any agent. Enter the task you are about to give it, review the printed memories, and paste the useful context into your prompt. This command calls the memory engine directly; an agent does not need to choose an MCP tool.
+
+```sh
+context-eng recall --project /path/to/repo --query "Fix login"
+```
+
+From this source checkout, run the same command without building:
+
+```sh
+node --import tsx src/cli-entry.ts recall --project . --query "Fix login"
+```
+
+By default, `recall` searches promoted project and global memories. With no `--project`, it uses `CONTEXT_ENG_PROJECT` or the current directory. Pass the repository root explicitly when running from a subdirectory. `--scope project` or `--scope global` narrows the search; global-only recall does not bind a project. `--limit 5` lowers the maximum number of returned memories, within the existing 4000-token budget.
+
+It uses the same semantic relevance check and local fallback as `memory_search`. `--local` skips the keychain and external service and uses local word matching only. The semantic service can take up to its existing 20-second request deadline before falling back. Printed memories include their update date, category, and project.
+
+Standard output contains the memory context. Warnings and errors go to standard error. No matches is a successful result with a `no matching memory.` message; invalid inputs and retrieval failures exit with status 1. The command does not create or edit memory claims, but opening the engine can initialise storage, migrate older databases, and refresh maps as usual.
+
+The terminal command itself does not install hooks. Use the prompt-box setup above for automatic or explicit in-agent recall. A session-start hook has no task query; task-specific recall runs on prompt submission.
+
 ## Search behavior
 
 `memory_search` can omit categories to search every category available in the selected scope. Supplying one to four categories narrows the search. Filters are applied before retrieval:
@@ -157,7 +284,9 @@ flowchart TD
 
 Node.js 20 or newer.
 
-One command, after this package is published. It asks for the TypeSafe key, then detects Cursor, Claude Code, and Codex. In a terminal the installed ones start selected. Space turns one off, Enter confirms, and init writes a user-level MCP server only for the ones left selected. A different existing `context-eng` setup needs confirmation before replacement. In a non-terminal session, use `--yes` to add missing servers without replacing different ones. That server is `npx -y context-eng mcp` when `npx` is on PATH, otherwise `pnpm dlx context-eng mcp`. Global configs omit `--project`.
+One command, after this package is published. It asks for the TypeSafe key, then detects Cursor, Claude Code, and Codex. In a terminal the installed ones start selected. Space turns one off, Enter confirms, and init writes a user-level MCP server only for the ones left selected. It then asks whether to install prompt-box hooks; if you choose yes, select recall mode, post-session saving, and the Claude/Codex hosts. The wizard configures global hooks; use the explicit `--scope project --project <path>` hook commands when a hook should belong to one project. A different existing `context-eng` setup needs confirmation before replacement. In a non-terminal session, or with `--yes`, the hook wizard does not run. That server is `npx -y context-eng mcp` when `npx` is on PATH, otherwise `pnpm dlx context-eng mcp`. Global configs omit `--project`.
+
+When init runs from a temporary `npx` or `pnpm dlx` cache, MCP setup completes and the hook wizard is skipped with an explanation. To choose hooks, run `npm install -g context-eng`, then `context-eng init` from that durable installation. A stable source checkout can also run the wizard.
 
 ```bash
 npx -y context-eng init

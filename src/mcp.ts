@@ -6,16 +6,12 @@ import {
   MAX_FILTER_VALUE_LENGTH,
   MAX_FILTER_VALUES,
   MAX_HITS,
-  MAX_JEV_BATCHES,
-  MAX_JEV_CANDIDATES,
   MAX_SEARCH_CATEGORIES,
 } from "./categories.js";
 import { EngineError, type Engine } from "./engine.js";
+import { renderMemoryContext, retrieveMemories, type MemoryContext } from "./retrieval.js";
 import {
-  NOT_RELEVANT_MESSAGE,
-  TypeSafeError,
   TypeSafeRelevanceEvaluator,
-  applyRelevanceGate,
   type RelevanceEvaluator,
 } from "./typesafe.js";
 
@@ -72,51 +68,6 @@ function engineFail(err: EngineError, retryTool?: "memory_create" | "memory_edit
   };
 }
 
-interface ContextResult {
-  hits: Array<{
-    scope: "global" | "project";
-    category: string;
-    content: string;
-    updated_at: number;
-  }>;
-  eligible_count: number;
-  retrieval: {
-    mode: "small" | "large";
-    candidate_count: number;
-    channels: string[];
-  };
-  message?: string;
-}
-
-function contextOnly(result: ContextResult, projectPath: string | undefined) {
-  const evaluatedCandidates = Math.min(
-    result.retrieval.candidate_count,
-    MAX_JEV_CANDIDATES * MAX_JEV_BATCHES,
-  );
-  const channels = result.retrieval.channels.join("+") || "none";
-  const retrieval = result.retrieval.mode === "small"
-    ? `retrieval: small · eligible ${result.eligible_count}`
-    : `retrieval: large · ${evaluatedCandidates} candidates · ${channels}`;
-  const context = result.hits
-    .map((hit) => {
-      const project = hit.scope === "global" ? "global" : projectPath ?? "unbound";
-      const updated = new Date(hit.updated_at * 1000).toISOString();
-      return `[last updated: ${updated} | category: ${hit.category} | project: ${project}]\n${hit.content}`;
-    })
-    .join("\n\n");
-  const text = [retrieval, context, result.message || (context ? undefined : NOT_RELEVANT_MESSAGE)]
-    .filter(Boolean)
-    .join("\n\n");
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text,
-      },
-    ],
-  };
-}
-
 function handle(fn: () => unknown, retryTool?: "memory_create" | "memory_edit") {
   try {
     return ok(fn());
@@ -126,9 +77,10 @@ function handle(fn: () => unknown, retryTool?: "memory_create" | "memory_edit") 
   }
 }
 
-async function handleSearch(engine: Engine, fn: () => Promise<ContextResult>) {
+async function handleSearch(engine: Engine, fn: () => Promise<MemoryContext>) {
   try {
-    return contextOnly(await fn(), engine.projectPath);
+    const text = renderMemoryContext(await fn(), engine.projectPath);
+    return { content: [{ type: "text" as const, text }] };
   } catch (err) {
     if (err instanceof EngineError) {
       const message = err.code === "PROJECT_NOT_BOUND" ? `${err.code}: ${err.message}` : err.message;
@@ -214,15 +166,7 @@ export function createServer(
           ...(args.sort !== undefined ? { sort: args.sort } : {}),
           ...(args.limit !== undefined ? { limit: args.limit } : {}),
         };
-        if (relevanceEvaluator.available?.() === false) return engine.search(input);
-        try {
-          return await applyRelevanceGate(engine.prepareSearch(input), relevanceEvaluator);
-        } catch (error) {
-          if (!(error instanceof TypeSafeError)) throw error;
-          const message = error instanceof Error ? error.message : String(error);
-          process.stderr.write(`[context-eng] Jev unavailable; using FTS5 fallback: ${message}\n`);
-          return engine.search(input);
-        }
+        return retrieveMemories(engine, input, relevanceEvaluator);
       }),
   );
 

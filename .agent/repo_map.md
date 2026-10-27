@@ -19,9 +19,24 @@
   - Contains: Built-in `CATEGORIES`/`AUTO_PROMOTE`, canonical/display normalization, and hard limits for content, categories, Jev candidates/batches, filters, returned hits, and tokens.
 
 - `src/cli.ts`:
-  - Use: Implements the `context-eng mcp` and `context-eng init` commands without auto-running on import.
+  - Use: Implements `context-eng mcp`, `init`, `recall`, and the host-facing `hook` entry point without auto-running on import.
   - Useful/used by: `cli-entry.ts` calls `main`; init validates the project, writes agent pointers, selects clients, and invokes `harness.ts` to register their servers.
-  - Contains: Argument parsing, usage validation, repository-root discovery, marked-block insertion/replacement, project initialization, global Codex and Claude pointers, client selection, and conflict confirmation.
+  - Contains: Argument parsing, usage validation, marked-block insertion/replacement, project initialization, global Codex and Claude pointers, client selection, conflict confirmation, an interactive prompt-box-hook wizard, terminal recall, and manual/automatic/off hook setup with host/scope validation.
+
+- `src/hooks.ts`:
+  - Use: Retrieves context before Codex or Claude processes a submitted prompt.
+  - Useful/used by: `cli.ts` dispatches `hook`; `hook-install.ts` shares host/mode types and the timeout.
+  - Contains: Bounded stdin JSON parsing, explicit recall recognition, per-prompt automatic recall, lightweight read-only engine opening, short semantic deadlines with local fallback, exact model-visible context budgeting, bounded provenance-bearing context, and non-blocking error handling.
+
+- `src/hook-install.ts`:
+  - Use: Installs, updates, and removes the owned prompt-box skills and UserPromptSubmit handlers.
+  - Useful/used by: `cli.ts` dispatches recall-only init; hook/installer tests use isolated homes and projects.
+  - Contains: JSON-preserving command-hook merges for UserPromptSubmit/Stop, owned-file snapshots with reverse rollback and concurrent-edit conflict reporting, separate ownership markers, conflict checks, global/project layouts, safely quoted durable runtime commands, source-checkout loaders, and temporary-cache rejection.
+
+- `src/postsession.ts`:
+  - Use: Requests one final memory-saving pass from the current host model when a task response ends.
+  - Useful/used by: `cli.ts` dispatches the postsession handler and independent on/off setup; `hook-install.ts` supplies shared command/configuration helpers.
+  - Contains: Stop-event validation, stop_hook_active loop guard, explicit project binding instructions, immediate-searchability guidance via create/promote tools, non-blocking JSON errors, and owned Stop-handler installation/removal. Prompt instructions ship in `system_prompts/postsession.md`.
 
 - `src/cli-entry.ts`:
   - Use: Executable entry point for the package and npm scripts.
@@ -30,7 +45,7 @@
 
 - `src/harness.ts`:
   - Use: Detects installed MCP clients and manages their user-level server registrations.
-  - Useful/used by: `cli.ts` uses it after init selection; `test/harness.test.ts` covers config preservation and replacement.
+  - Useful/used by: `cli.ts` uses it after init selection, `hook-install.ts` reuses atomic configuration writing, and `test/harness.test.ts` covers config preservation and replacement.
   - Contains: Cursor, Claude, and Codex detection; npm/pnpm launch selection; JSON and TOML updates; atomic writes beside resolved config targets; preservation of identical or conflicting existing registrations; and install reporting.
 
 - `src/db.ts`:
@@ -40,8 +55,8 @@
 
 - `src/engine.ts`:
   - Use: Implements explicit project binding, category-routed memory operations, custom-category creation, legacy migration, structured filters, two-mode Jev candidate preparation, and local fallback.
-  - Useful/used by: `cli.ts` owns the engine lifecycle; `mcp.ts` uses its Jev-preparation and local-search paths; `index.ts` exports its public contracts.
-  - Contains: An optional project layout guarded by one `PROJECT_NOT_BOUND` gate, global-only aggregate behavior while unbound, scope catalogs/category connection management, staged legacy migration, cross-database moves, the 60-row/12,000-token mode switch, typo retry, FTS/label/fill merging, token budgets, project binding, and aggregated maps.
+  - Useful/used by: `cli.ts` owns the normal engine lifecycle, `hooks.ts` uses its lightweight retrieval opening, `mcp.ts` uses its Jev-preparation and local-search paths, and `index.ts` exports its public contracts.
+  - Contains: An optional project layout guarded by one `PROJECT_NOT_BOUND` gate, a lightweight open mode that skips unchanged map rewrites while still refreshing after migrations and mutations, global-only aggregate behavior while unbound, scope catalogs/category connection management, staged legacy migration, cross-database moves, the 60-row/12,000-token mode switch, typo retry, FTS/label/fill merging, token budgets, project binding, and aggregated maps.
 
 - `src/index.ts`:
   - Use: Acts as the package's public barrel file so consumers can import the main constants, types, `Engine`, and `EngineError` from one module.
@@ -56,7 +71,12 @@
 - `src/mcp.ts`:
   - Use: Exposes category-routed memory tools, optional search hints, retrieval diagnostics, and the batched Jev/local-fallback contract over MCP stdio.
   - Useful/used by: `cli.ts` starts it; MCP clients may narrow searches by category, while omitted categories search every available category; mutations still require routing categories.
-  - Contains: Schemas for structured filters/metadata, project binding, plain-context output, missing-key detection, Jev timeout/error fallback diagnostics, and server lifecycle handling.
+  - Contains: Schemas for structured filters/metadata, project binding, MCP text/error responses using shared retrieval, missing-key detection, and server lifecycle handling.
+
+- `src/retrieval.ts`:
+  - Use: Shares memory retrieval and plain-text context rendering between MCP and terminal recall.
+  - Useful/used by: `mcp.ts` and the `recall` command in `cli.ts`.
+  - Contains: Semantic evaluation with local fallback, fallback diagnostics, retrieval counts, memory provenance, and empty-result messages.
 
 - `src/search.ts`:
   - Use: Normalizes search inputs, resolves scope/category sources, applies hard filters, merges FTS5 and exact-label signals, and enforces result ordering and read budgets.

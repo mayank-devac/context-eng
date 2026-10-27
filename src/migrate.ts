@@ -24,12 +24,12 @@ export function migrateLegacy(args: {
   catalog: Db;
   categoriesDir: string;
   legacyFile: string;
-}): void {
+}): boolean {
   const { catalog, categoriesDir, legacyFile } = args;
-  if (metadataValue(catalog, MIGRATION_KEY) === "2") return;
+  if (metadataValue(catalog, MIGRATION_KEY) === "2") return false;
   if (!existsSync(legacyFile)) {
     setMetadata(catalog, MIGRATION_KEY, "2");
-    return;
+    return false;
   }
   const legacy = new Database(legacyFile, { readonly: true, fileMustExist: true });
   let stagingDir: string | undefined;
@@ -39,13 +39,13 @@ export function migrateLegacy(args: {
       .get() as { present: number } | undefined;
     if (!table) {
       setMetadata(catalog, MIGRATION_KEY, "2");
-      return;
+      return false;
     }
     const rawRows = legacy.prepare(`SELECT * FROM memories`).all() as Array<Record<string, unknown>>;
     const validRows = rawRows.filter((raw) => isCategory(String(raw.category ?? "")));
     if (validRows.length === 0) {
       setMetadata(catalog, MIGRATION_KEY, "2");
-      return;
+      return false;
     }
     const migrationParent = path.dirname(categoriesDir);
     mkdirSync(migrationParent, { recursive: true });
@@ -109,6 +109,7 @@ export function migrateLegacy(args: {
       for (const target of staged.values()) registerCategory(catalog, target.record);
       setMetadata(catalog, MIGRATION_KEY, "2");
     })();
+    return true;
   } finally {
     legacy.close();
     if (stagingDir) rmSync(stagingDir, { recursive: true, force: true });

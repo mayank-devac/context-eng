@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -193,6 +193,58 @@ describe("deferred project binding", () => {
       engine.close();
       rmSync(home, { recursive: true, force: true });
     }
+  });
+});
+
+describe("summary map refreshes", () => {
+  it("recalls from an existing store without rewriting unchanged summary files", () => {
+    const context = openIsolatedEngine();
+    cleanup = context.cleanup;
+    const { home, project } = context;
+    const seeded = context.engine.create({
+      scope: "project", category: "decision", content: "Keep recall map reads lightweight.",
+    });
+    context.engine.close();
+    const layout = layoutFor(project, home);
+    writeFileSync(layout.globalMapMd, "global sentinel\n");
+    writeFileSync(layout.globalMapJson, "{\"global\":\"sentinel\"}\n");
+    writeFileSync(layout.projectMapMd, "project sentinel\n");
+    writeFileSync(layout.projectMapJson, "{\"project\":\"sentinel\"}\n");
+
+    const recall = new Engine({ home, projectPath: project, refreshMaps: false });
+    try {
+      expect(recall.search({ query: "recall map", filters: { scope: "project" } }).hits.map((hit) => hit.id)).toContain(
+        seeded.memory.id,
+      );
+      expect(readFileSync(layout.globalMapMd, "utf8")).toBe("global sentinel\n");
+      expect(readFileSync(layout.globalMapJson, "utf8")).toBe("{\"global\":\"sentinel\"}\n");
+      expect(readFileSync(layout.projectMapMd, "utf8")).toBe("project sentinel\n");
+      expect(readFileSync(layout.projectMapJson, "utf8")).toBe("{\"project\":\"sentinel\"}\n");
+    } finally {
+      recall.close();
+    }
+  });
+
+  it("refreshes summary files after each memory mutation", () => {
+    const context = openIsolatedEngine();
+    cleanup = context.cleanup;
+    const { engine, home, project } = context;
+    const layout = layoutFor(project, home);
+    const created = engine.create({ scope: "project", category: "research", content: "Keep maps current after create." });
+    expect(JSON.parse(readFileSync(layout.projectMapJson, "utf8")).staging.count).toBe(1);
+
+    engine.edit("research", created.memory.id, { content: "Keep maps current after edit." });
+    expect(readFileSync(layout.projectMapMd, "utf8")).toContain("Keep maps current after edit.");
+
+    engine.promote("research", created.memory.id);
+    expect(JSON.parse(readFileSync(layout.projectMapJson, "utf8")).staging.count).toBe(0);
+
+    engine.demote("research", created.memory.id);
+    expect(JSON.parse(readFileSync(layout.projectMapJson, "utf8")).staging.count).toBe(1);
+
+    engine.delete("research", created.memory.id);
+    expect(JSON.parse(readFileSync(layout.projectMapJson, "utf8")).staging.count).toBe(0);
+    expect(existsSync(layout.globalMapMd)).toBe(true);
   });
 });
 
@@ -690,13 +742,14 @@ describe("legacy migration and project binding", () => {
       .run("legacy-id", layout.projectKey, null, "decision", "Keep migrated memory.", "legacy", 0.8, 1, 1789322327852, 1789322607803);
     legacy.close();
 
-    const engine = new Engine({ home, projectPath: project });
+    const engine = new Engine({ home, projectPath: project, refreshMaps: false });
     try {
       const memory = engine.get("decision", "legacy-id");
       expect(memory.tags).toEqual(["legacy"]);
       expect(memory.created_at).toBe(1789322327);
       expect(memory.updated_at).toBe(1789322607);
       expect(existsSync(layout.projectDb)).toBe(true);
+      expect(readFileSync(layout.projectMapMd, "utf8")).toContain("Keep migrated memory.");
       expect(engine.categoryDatabasePath("project", "decision")).not.toBe(layout.projectDb);
     } finally {
       engine.close();

@@ -1,5 +1,6 @@
 node_modules/
 dist/
+*.tgz
 .env
 *.db
 *.db-journal
@@ -10,3 +11,4 @@ dist/
 docs/
 .mcp.json
 docs/plan_stages
+.codex

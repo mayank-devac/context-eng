@@ -9,6 +9,7 @@ import {
   cursorRulePath,
   globalClaudeAgentsPath,
   globalCursorRulePath,
+  promptHookSetup,
   resolveCursorRuleScope,
   upsertMarkedBlock,
   updateExistingPointer,
@@ -24,6 +25,39 @@ import { resolveProjectPath } from "../src/paths.js";
 const BLOCK = `<!-- context-eng:start -->
 Use the memory MCP tools.
 <!-- context-eng:end -->`;
+
+async function hookPrompt(answers: string) {
+  const pending = answers.split("\n");
+  const result = await promptHookSetup({ ask: () => Promise.resolve(pending.shift() ?? "") });
+  return { result };
+}
+
+describe.skipIf(process.platform === "win32")("promptHookSetup", () => {
+  it.each(["_npx", "dlx"])("skips the wizard for a temporary %s runtime before asking any questions", async (cache) => {
+    const messages: string[] = [];
+    let questions = 0;
+    const result = await promptHookSetup({
+      runtime: { nodePath: process.execPath, entryPath: path.join(os.tmpdir(), cache, "package/cli-entry.js") },
+      ask: async () => { questions += 1; return "yes"; },
+      log: (line) => messages.push(line),
+    });
+    expect(result).toBeUndefined();
+    expect(questions).toBe(0);
+    expect(messages.join("\n")).toContain("temporary package cache");
+    expect(messages.join("\n")).toContain("npm install -g context-eng");
+    expect(messages.join("\n")).toContain("context-eng init to choose your hooks");
+  });
+
+  it("collects recall and post-session choices after hook installation is accepted", async () => {
+    const { result } = await hookPrompt("yes\nautomatic\nyes\n");
+    expect(result).toEqual({ recall: "automatic", postsession: true });
+  });
+
+  it("does not configure hooks when installation is declined", async () => {
+    const { result } = await hookPrompt("no\n");
+    expect(result).toBeUndefined();
+  });
+});
 
 describe("upsertMarkedBlock", () => {
   it("creates a file that contains only the marked pointer", () => {

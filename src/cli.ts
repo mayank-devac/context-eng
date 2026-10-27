@@ -4,7 +4,23 @@ import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { MAX_HITS } from "./categories.js";
 import { Engine } from "./engine.js";
+import {
+  currentHookRuntime,
+  installRecallHooks,
+  validateHookRuntime,
+  type HookRuntime,
+  type RecallInstallOptions,
+} from "./hook-install.js";
+import {
+  RECALL_HARNESSES,
+  parseRecallHarness,
+  parseRecallMode,
+  runRecallHook,
+  type RecallHarness,
+  type RecallMode,
+} from "./hooks.js";
 import {
   detectHarnesses,
   formatHarnessReport,
@@ -15,6 +31,8 @@ import {
 } from "./harness.js";
 import { runStdio } from "./mcp.js";
 import { resolveProjectPath } from "./paths.js";
+import { installPostsessionHook, parsePostsessionMode, runPostsessionHook } from "./postsession.js";
+import { renderMemoryContext, retrieveMemories } from "./retrieval.js";
 import { ensureTypeSafeKey, loadTypeSafeApiKey, openOsKeychain } from "./secrets.js";
 import { TypeSafeRelevanceEvaluator } from "./typesafe.js";
 
@@ -34,11 +52,35 @@ const CLAUDE_RULE_FILE = "context-eng-memory.md";
 
 const USAGE = `Usage:
   context-eng mcp [--project <path>]
+  context-eng recall --query <text> [--project <path>] [--scope global|project|both] [--limit <1-50>] [--local]
   context-eng init [--project <path>] [--yes]
+  context-eng init --recall manual|automatic|off [--harness claude|codex] [--scope global|project] [--project <path>] [--local] [--yes]
+  context-eng init --postsession on|off [--harness claude|codex] [--scope global|project] [--project <path>] [--yes]
   context-eng init --codex-only
   context-eng init --cursor-only [--scope global|project|both] [--project <path>]
   context-eng init --claude-only [--scope global|project|both] [--project <path>]
+  context-eng hook --harness claude|codex --mode manual|automatic [--project <path>] [--local]
+  context-eng postsession --harness claude|codex [--project <path>]
 `;
+
+interface CliOptions {
+  project?: string;
+  scope?: string;
+  query?: string;
+  limit?: string;
+  local?: boolean;
+  recall?: string;
+  postsession?: string;
+  harness?: string;
+  mode?: string;
+  help?: boolean;
+  yes?: boolean;
+  "context-eng-recall"?: boolean;
+  "context-eng-postsession"?: boolean;
+  "codex-only"?: boolean;
+  "cursor-only"?: boolean;
+  "claude-only"?: boolean;
+}
 
 export function upsertMarkedBlock(existing: string | null, block: string): string {
   const unit = block.trimEnd();
@@ -239,16 +281,119 @@ async function confirmHarnessReplacement(id: HarnessId, file: string): Promise<b
   }
 }
 
+type HookSetup = { kind: "recall"; mode: RecallMode } | { kind: "postsession"; enabled: boolean };
+
+export interface InteractiveHookSetup {
+  recall: RecallMode;
+  postsession: boolean;
+}
+
+export async function promptHookSetup(
+  options: {
+    ask?: (question: string) => Promise<string>;
+    log?: (line: string) => void;
+    runtime?: HookRuntime;
+  } = {},
+): Promise<InteractiveHookSetup | undefined> {
+  const log = options.log ?? ((line: string) => process.stdout.write(`${line}\n`));
+  try {
+    validateHookRuntime(options.runtime ?? currentHookRuntime());
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log(`Prompt-box hook setup skipped: ${message}`);
+    if (process.platform !== "win32") {
+      log("For a durable installation, run npm install -g context-eng, then context-eng init to choose your hooks.");
+    }
+    return undefined;
+  }
+  const prompt = options.ask === undefined
+    ? createInterface({ input: process.stdin, output: process.stdout })
+    : undefined;
+  const ask = options.ask ?? ((question: string) => prompt!.question(question));
+  try {
+    const install = await ask("Install prompt-box hooks? [y/N] ");
+    if (!/^y(?:es)?$/i.test(install.trim())) return undefined;
+
+    let recall: RecallMode | undefined;
+    while (recall === undefined) {
+      const answer = (await ask("Recall mode: [m]anual, [a]utomatic, or [o]ff (default: manual) ")).trim().toLowerCase();
+      if (answer === "" || answer === "m" || answer === "manual") recall = "manual";
+      else if (answer === "a" || answer === "automatic") recall = "automatic";
+      else if (answer === "o" || answer === "off") recall = "off";
+      else log("Choose manual, automatic, or off.");
+    }
+    const postsession = await ask("Enable post-session memory saving? [y/N] ");
+    return { recall, postsession: /^y(?:es)?$/i.test(postsession.trim()) };
+  } finally {
+    prompt?.close();
+  }
+}
+
+async function configureMemoryHooks(
+  values: CliOptions, setup: HookSetup, selectedHarnesses?: readonly RecallHarness[],
+): Promise<void> {
+  if (values.query !== undefined || values.limit !== undefined) throw new Error("hook setup does not accept --query or --limit");
+  if (setup.kind === "postsession" && values.local !== undefined) throw new Error("postsession uses the harness model; --local only applies to recall");
+  if (values["cursor-only"]) throw new Error("This integration supports Claude Code and Codex; select one with --harness");
+  const scope = values.scope ?? "global";
+  if (scope !== "global" && scope !== "project") throw new Error("hook setup scope must be global or project");
+  if (scope === "project" && values.project === undefined) throw new Error("project hook setup requires --project <path>");
+  const projectPath = resolveProjectPath(values.project);
+  if (!existsSync(projectPath) || !statSync(projectPath).isDirectory()) throw new Error("hook setup requires an existing project directory");
+  const disabled = setup.kind === "recall" ? setup.mode === "off" : !setup.enabled;
+  const only = [values["claude-only"] ? "claude" : undefined, values["codex-only"] ? "codex" : undefined]
+    .filter((id): id is "claude" | "codex" => id !== undefined);
+  if (values.harness && only.length) throw new Error("use --harness or the --*-only flags, not both");
+  const home = os.homedir();
+  let selected: readonly HarnessId[];
+  if (selectedHarnesses !== undefined) selected = selectedHarnesses;
+  else if (values.harness !== undefined) selected = [parseRecallHarness(values.harness)];
+  else if (only.length) selected = only;
+  else if (disabled) selected = RECALL_HARNESSES;
+  else {
+    const installed = detectHarnesses({ home, hasCommand: pathHasCommand })
+      .filter((hit) => hit.installed && hit.id !== "cursor")
+      .map((hit) => hit.id);
+    selected = process.stdin.isTTY === true && values.yes !== true ? await promptHarnessChoice(installed) : installed;
+  }
+  if (!selected.length) throw new Error("No hook host selected. Use --harness claude or --harness codex.");
+  for (const id of selected) {
+    const common: Pick<RecallInstallOptions, "harness" | "scope" | "home" | "projectPath"> = {
+      harness: parseRecallHarness(id), scope, home, projectPath,
+    };
+    const files = setup.kind === "recall"
+      ? installRecallHooks({ ...common, mode: setup.mode, ...(values.local === undefined ? {} : { local: values.local }) }).files
+      : installPostsessionHook({ ...common, enabled: setup.enabled });
+    const mode = setup.kind === "recall" ? setup.mode : setup.enabled ? "on" : "off";
+    console.log(`${id} ${setup.kind}: ${mode}${files.length ? "" : " (unchanged)"}`);
+    for (const file of files) console.log(`  ${file}`);
+  }
+  if (!disabled) {
+    console.log("Restart the selected host. In Codex, review and trust the hook using /hooks.");
+    console.log(setup.kind === "recall"
+      ? "Manual recall: /recall <topic> in Claude, or $recall <topic> in Codex."
+      : "Postsession needs memory_create and memory_promote connected and permitted in the host. Saved notes become searchable immediately.");
+  }
+}
+
+async function configureInteractiveHooks(values: CliOptions): Promise<void> {
+  if (process.stdin.isTTY !== true || values.yes === true) return;
+  const setup = await promptHookSetup();
+  if (!setup) return;
+  const hosts = detectHarnesses({ home: os.homedir(), hasCommand: pathHasCommand })
+    .filter((hit) => hit.installed && hit.id !== "cursor")
+    .map((hit) => parseRecallHarness(hit.id));
+  const selected = (await promptHarnessChoice(hosts)).map((id) => parseRecallHarness(id));
+  if (!selected.length) {
+    console.log("No prompt-box hook host selected; skipped hook setup.");
+    return;
+  }
+  await configureMemoryHooks(values, { kind: "recall", mode: setup.recall }, selected);
+  await configureMemoryHooks(values, { kind: "postsession", enabled: setup.postsession }, selected);
+}
+
 export async function main(): Promise<void> {
-  let values: {
-    project?: string;
-    scope?: string;
-    help?: boolean;
-    yes?: boolean;
-    "codex-only"?: boolean;
-    "cursor-only"?: boolean;
-    "claude-only"?: boolean;
-  };
+  let values: CliOptions;
   let positionals: string[];
   try {
     const parsed = parseArgs({
@@ -256,6 +401,15 @@ export async function main(): Promise<void> {
       options: {
         project: { type: "string" },
         scope: { type: "string" },
+        query: { type: "string" },
+        limit: { type: "string" },
+        local: { type: "boolean" },
+        recall: { type: "string" },
+        postsession: { type: "string" },
+        harness: { type: "string" },
+        mode: { type: "string" },
+        "context-eng-recall": { type: "boolean" },
+        "context-eng-postsession": { type: "boolean" },
         help: { type: "boolean", short: "h" },
         yes: { type: "boolean" },
         "codex-only": { type: "boolean" },
@@ -277,8 +431,84 @@ export async function main(): Promise<void> {
   }
 
   const command = positionals[0];
-  if (command !== "mcp" && command !== "init") {
+  if (command !== "mcp" && command !== "init" && command !== "recall" && command !== "hook" && command !== "postsession") {
     usage();
+  }
+
+  if (command === "postsession") {
+    if (values.scope !== undefined || values.query !== undefined || values.limit !== undefined || values.local !== undefined ||
+      values.mode !== undefined || values.recall !== undefined || values.postsession !== undefined || values["context-eng-recall"] !== undefined ||
+      values.yes || values["codex-only"] || values["claude-only"] || values["cursor-only"]) {
+      throw new Error("postsession only accepts --harness and --project");
+    }
+    if (!values.harness) throw new Error("postsession requires --harness claude or codex");
+    parseRecallHarness(values.harness);
+    await runPostsessionHook(values.project === undefined ? undefined : resolveProjectPath(values.project));
+    return;
+  }
+  if (values["context-eng-postsession"] !== undefined) throw new Error("--context-eng-postsession is only supported by postsession");
+
+  if (command === "hook") {
+    if (values.scope !== undefined || values.query !== undefined || values.limit !== undefined || values.recall !== undefined || values.postsession !== undefined ||
+      values.yes || values["codex-only"] || values["claude-only"] || values["cursor-only"]) {
+      throw new Error("hook only accepts --harness, --mode, --project, and --local");
+    }
+    if (!values.harness) throw new Error("hook requires --harness claude or codex");
+    await runRecallHook({
+      harness: parseRecallHarness(values.harness), mode: parseRecallMode(values.mode ?? "manual"),
+      ...(values.project === undefined ? {} : { projectPath: resolveProjectPath(values.project) }),
+      ...(values.local === undefined ? {} : { local: values.local }),
+    });
+    return;
+  }
+  if (values.mode !== undefined || values["context-eng-recall"] !== undefined) {
+    throw new Error("--mode and --context-eng-recall are only supported by hook");
+  }
+  if (values.recall !== undefined && values.postsession !== undefined) throw new Error("Configure recall and postsession separately");
+  if (command === "init" && values.postsession !== undefined) {
+    await configureMemoryHooks(values, { kind: "postsession", enabled: parsePostsessionMode(values.postsession) });
+    return;
+  }
+  if (command === "init" && values.recall !== undefined) {
+    await configureMemoryHooks(values, { kind: "recall", mode: parseRecallMode(values.recall) });
+    return;
+  }
+  if (values.recall !== undefined || values.postsession !== undefined || values.harness !== undefined) {
+    throw new Error("Hook configuration flags require init --recall or init --postsession");
+  }
+
+  if (command === "recall") {
+    if (values.yes || values["codex-only"] || values["cursor-only"] || values["claude-only"]) {
+      throw new Error("recall does not accept init options");
+    }
+    if (!values.query?.trim()) throw new Error("recall requires --query <text>");
+    const scope = values.scope ?? "both";
+    if (scope !== "global" && scope !== "project" && scope !== "both") {
+      throw new Error("--scope must be global, project, or both");
+    }
+    const limit = values.limit === undefined ? MAX_HITS : Number(values.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_HITS) {
+      throw new Error(`--limit must be an integer from 1 to ${MAX_HITS}`);
+    }
+    const projectPath = scope === "global" ? undefined : resolveProjectPath(values.project);
+    if (projectPath !== undefined && (!existsSync(projectPath) || !statSync(projectPath).isDirectory())) {
+      throw new Error(`project path must be an existing directory: ${projectPath}`);
+    }
+    const engine = new Engine(projectPath === undefined ? { deferProject: true } : { projectPath });
+    try {
+      const loaded = values.local ? undefined : await loadTypeSafeApiKey();
+      if (loaded?.warning) console.error(loaded.warning);
+      const evaluator = loaded === undefined ? undefined : new TypeSafeRelevanceEvaluator({ apiKey: loaded.apiKey });
+      const result = await retrieveMemories(engine, { query: values.query, filters: { scope }, limit }, evaluator);
+      process.stdout.write(`${renderMemoryContext(result, engine.projectPath)}\n`);
+    } finally {
+      engine.close();
+    }
+    return;
+  }
+
+  if (values.query !== undefined || values.limit !== undefined || values.local !== undefined) {
+    throw new Error("--query, --limit, and --local are only supported by recall");
   }
 
   if (command === "mcp") {
@@ -369,6 +599,10 @@ export async function main(): Promise<void> {
       console.log(`  global Claude instructions: ${writeGlobalClaudePointer(block, home)}`);
     }
     console.log(formatHarnessReport(report));
+    await configureInteractiveHooks(values);
+    if (process.stdin.isTTY !== true || values.yes === true) {
+      console.log("For prompt-box memory recall, run context-eng init --recall manual or --recall automatic.");
+    }
   } finally {
     engine.close();
   }
