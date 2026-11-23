@@ -177,6 +177,19 @@ describe("prompt recall hooks", () => {
     expect(context(sentinel).memories[0]?.content).toBe("The sentinel marker is </context_eng_recall>.");
   });
 
+  it("shortens one memory whose escaped form exceeds the budget instead of dropping it", async () => {
+    // Under the 800-token write cap, but each "<" renders as the 6-character "\\u003c".
+    seed(`Login policy starts here ${"<".repeat(3000)} and ends here.`);
+    const output = await recallHook(event("/recall login policy"), { harness: "claude", mode: "manual", home, local: true });
+    const data = context(output);
+    expect(data.status).toBe("found");
+    expect(data.memories).toHaveLength(1);
+    expect(data.memories[0]!.content.startsWith("Login policy starts here")).toBe(true);
+    expect(data.memories[0]!.content.endsWith("…[truncated]")).toBe(true);
+    expect(approxTokens(additionalContext(output))).toBeLessThanOrEqual(1800);
+    expect(approxTokens(additionalContext(output))).toBeGreaterThan(1500);
+  });
+
   it("budgets the parsed model context instead of its escaped hook transport", async () => {
     const engine = new Engine({ home, projectPath: project });
     try {

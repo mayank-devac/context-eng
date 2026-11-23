@@ -85,6 +85,22 @@ export function renderRecallContext(context: Record<string, unknown>): string {
   ].join("\n");
 }
 
+const TRUNCATED_SUFFIX = " …[truncated]";
+
+/** Keep the longest prefix of one oversized memory that still fits, instead of dropping it whole. */
+function truncateToFit(memory: { content: string }, fits: () => boolean): void {
+  const original = memory.content;
+  let low = 0;
+  let high = original.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    memory.content = original.slice(0, mid).trimEnd() + TRUNCATED_SUFFIX;
+    if (fits()) low = mid;
+    else high = mid - 1;
+  }
+  memory.content = low > 0 ? original.slice(0, low).trimEnd() + TRUNCATED_SUFFIX : original;
+}
+
 function hookOutput(additionalContext: string): string {
   return JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext } });
 }
@@ -137,7 +153,10 @@ export async function recallHook(raw: unknown, options: RecallHookOptions): Prom
       message: memories.length ? "" : "no matching memory.",
       memories,
     };
-    while (memories.length && approxTokens(renderRecallContext(context)) > MAX_CONTEXT_TOKENS) memories.pop();
+    const fits = () => approxTokens(renderRecallContext(context)) <= MAX_CONTEXT_TOKENS;
+    while (memories.length > 1 && !fits()) memories.pop();
+    if (memories.length === 1 && !fits()) truncateToFit(memories[0]!, fits);
+    if (memories.length === 1 && !fits()) memories.pop();
     if (memories.length === 0 && result.hits.length > 0) {
       context.status = "empty";
       context.message = "No memories fit the hook context budget.";

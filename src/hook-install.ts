@@ -70,8 +70,11 @@ function hookConfig(existing: string | null, eventName: CommandHookEvent) {
   return { root, hooks, groups };
 }
 
+/** Owned if the owner flag appears as its own unquoted word, so user suffixes like `2>/dev/null` keep ownership. */
 function ownedHandler(handler: JsonObject, ownerArgument: string): boolean {
-  return typeof handler.command === "string" && handler.command.trimEnd().endsWith(ownerArgument);
+  if (typeof handler.command !== "string") return false;
+  const unquoted = handler.command.replace(/'[^']*'/g, "''");
+  return unquoted.split(/\s+/).includes(ownerArgument.trim());
 }
 
 export function hasCommandHook(existing: string | null, eventName: CommandHookEvent, ownerArgument: string): boolean {
@@ -256,9 +259,12 @@ export function installRecallHooks(options: RecallInstallOptions): RecallInstall
     ? mergeRecallHookConfig(existing, command)
     : existing;
   if (active) {
-    const other = installPaths(options, options.scope === "global" ? "project" : "global");
-    if (hasRecallHook(readOptional(other.config))) {
-      throw new Error(`Recall is already installed in ${other.config}. Disable that scope first to avoid duplicate retrieval.`);
+    const others = [installPaths(options, options.scope === "global" ? "project" : "global").config];
+    // Claude also loads the project's shared settings.json, which the installer never writes but users may.
+    if (options.harness === "claude") others.push(path.join(resolveProjectPath(options.projectPath), ".claude", "settings.json"));
+    const duplicate = others.find((file) => file !== locations.config && hasRecallHook(readOptional(file)));
+    if (duplicate) {
+      throw new Error(`Recall is already installed in ${duplicate}. Disable that scope first to avoid duplicate retrieval.`);
     }
   }
 
