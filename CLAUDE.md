@@ -12,3 +12,7 @@ Memory keeps mistakes, decisions, preferences and habits so you do not relearn t
 | `memory_demote` | waitlist | A searchable memory should leave default search |
 | `memory_delete` | discard | User rejects a staging memory. Demote first if it is already live |
 <!-- context-eng:end -->
+
+## Git attribution
+
+Do not add `Claude-Session` lines or session links to commit messages or pull request descriptions. Keep the `Co-Authored-By` line.
