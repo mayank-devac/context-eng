@@ -94,6 +94,36 @@ describe.skipIf(process.platform === "win32")("recall installation", () => {
     expect(() => installRecallHooks(options)).toThrow("already installed");
   });
 
+  it("keeps ownership of a recall command the user extended, but not of a lookalike inside a quoted path", () => {
+    installRecallHooks(options);
+    const file = configPath("codex");
+    const config = JSON.parse(readFileSync(file, "utf8"));
+    config.hooks.UserPromptSubmit[0].hooks[0].command += " 2>/dev/null";
+    const lookalike = { type: "command", command: "'/opt/x --context-eng-recall y/run.sh'" };
+    config.hooks.UserPromptSubmit.push({ hooks: [lookalike] });
+    writeFileSync(file, JSON.stringify(config));
+    installRecallHooks({ ...options, mode: "automatic" });
+    const updated = JSON.parse(readFileSync(file, "utf8"));
+    expect(updated.hooks.UserPromptSubmit).toHaveLength(2);
+    expect(updated.hooks.UserPromptSubmit[0]).toEqual({ hooks: [lookalike] });
+    expect(updated.hooks.UserPromptSubmit[1].hooks[0].command).toContain("automatic");
+    installRecallHooks({ ...options, mode: "off" });
+    expect(JSON.parse(readFileSync(file, "utf8")).hooks.UserPromptSubmit).toEqual([{ hooks: [lookalike] }]);
+  });
+
+  it("refuses a Claude recall install when the project's shared settings.json already has one", () => {
+    const shared = path.join(options.projectPath, ".claude", "settings.json");
+    mkdirSync(path.dirname(shared), { recursive: true });
+    const sharedConfig = JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command: "x --context-eng-recall" }] }] } });
+    writeFileSync(shared, sharedConfig);
+    const claude = { ...options, harness: "claude" as const };
+    expect(() => installRecallHooks(claude)).toThrow(`already installed in ${shared}`);
+    expect(() => installRecallHooks({ ...claude, scope: "project" })).toThrow(`already installed in ${shared}`);
+    expect(existsSync(configPath("claude"))).toBe(false);
+    expect(existsSync(path.join(options.projectPath, ".claude", "settings.local.json"))).toBe(false);
+    expect(readFileSync(shared, "utf8")).toBe(sharedConfig);
+  });
+
   it("quotes runtime and project paths safely in the actual shell command", () => {
     const command = recallHookCommand({ ...options, scope: "project", local: true });
     const result = spawnSync("/bin/sh", ["-c", command], { encoding: "utf8", timeout: 10_000 });

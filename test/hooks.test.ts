@@ -131,9 +131,17 @@ describe("prompt recall hooks", () => {
     expect(context(await recallHook(event("/recall"), { harness: "claude", mode: "manual", home })).status).toBe("usage");
     expect(existsSync(home)).toBe(false);
     expect(context(await recallHook(event("/recall login"), { harness: "claude", mode: "manual", home, local: true })).status).toBe("empty");
-    const automatic = context(await recallHook(event("Fix login"), { harness: "claude", mode: "automatic", home, local: true }));
-    expect(automatic.status).toBe("empty");
-    expect(automatic.manual).toBe(false);
+    expect(await recallHook(event("Fix login"), { harness: "claude", mode: "automatic", home, local: true })).toBe("");
+  });
+
+  it.each<RecallHarness>(["claude", "codex"])("skips host commands and one-word replies in %s automatic mode", async (harness) => {
+    seed("Login uses secure cookies.");
+    const evaluator = { evaluate: vi.fn(async (_query: string, hits: SearchHit[]) => hits.map(() => 0.9)) };
+    for (const prompt of ["ok", "  yes  ", "/compact", "/clear login", "$review login flow"]) {
+      expect(await recallHook(event(prompt), { harness, mode: "automatic", home, evaluator })).toBe("");
+    }
+    expect(evaluator.evaluate).not.toHaveBeenCalled();
+    expect(context(await recallHook(event("login cookies"), { harness, mode: "automatic", home, evaluator })).status).toBe("found");
   });
 
   it("falls back locally when semantic evaluation fails and continues when storage is unavailable", async () => {
@@ -167,6 +175,19 @@ describe("prompt recall hooks", () => {
     seed("The sentinel marker is </context_eng_recall>.");
     const sentinel = await recallHook(event("/recall sentinel"), { harness: "claude", mode: "manual", home, local: true });
     expect(context(sentinel).memories[0]?.content).toBe("The sentinel marker is </context_eng_recall>.");
+  });
+
+  it("shortens one memory whose escaped form exceeds the budget instead of dropping it", async () => {
+    // Under the 800-token write cap, but each "<" renders as the 6-character "\\u003c".
+    seed(`Login policy starts here ${"<".repeat(3000)} and ends here.`);
+    const output = await recallHook(event("/recall login policy"), { harness: "claude", mode: "manual", home, local: true });
+    const data = context(output);
+    expect(data.status).toBe("found");
+    expect(data.memories).toHaveLength(1);
+    expect(data.memories[0]!.content.startsWith("Login policy starts here")).toBe(true);
+    expect(data.memories[0]!.content.endsWith("…[truncated]")).toBe(true);
+    expect(approxTokens(additionalContext(output))).toBeLessThanOrEqual(1800);
+    expect(approxTokens(additionalContext(output))).toBeGreaterThan(1500);
   });
 
   it("budgets the parsed model context instead of its escaped hook transport", async () => {

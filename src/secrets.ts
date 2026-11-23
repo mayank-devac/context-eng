@@ -34,6 +34,38 @@ export async function loadTypeSafeApiKey(
   return resolveTypeSafeApiKey(env, () => store.get());
 }
 
+export type KeychainReader = (signal: AbortSignal) => Promise<string | null | undefined>;
+
+async function readOsKeychain(signal: AbortSignal): Promise<string | null | undefined> {
+  const { AsyncEntry } = await import("@napi-rs/keyring");
+  return new AsyncEntry(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT).getPassword(signal);
+}
+
+/** Hook-safe key load: a locked or prompting keychain falls back to local search instead of hanging. */
+export async function loadTypeSafeApiKeyWithin(
+  timeoutMs: number,
+  env: NodeJS.ProcessEnv = process.env,
+  read: KeychainReader = readOsKeychain,
+): Promise<{ apiKey: string; warning?: string }> {
+  if (env.TYPESAFE_API_KEY !== undefined) return { apiKey: env.TYPESAFE_API_KEY.trim() };
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`OS keychain did not answer within ${timeoutMs} ms.`));
+    }, timeoutMs);
+  });
+  try {
+    const value = await Promise.race([read(controller.signal), timeout]);
+    return { apiKey: value?.trim() ?? "" };
+  } catch (error) {
+    return { apiKey: "", warning: `TypeSafe keychain unreadable. Search will stay local. ${errorText(error)}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function openOsKeychain(): Promise<SecretStore> {
   try {
     const { Entry } = await import("@napi-rs/keyring");

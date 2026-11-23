@@ -2,7 +2,7 @@ import { isAbsolute } from "node:path";
 import { statSync } from "node:fs";
 import { Engine } from "./engine.js";
 import { retrieveMemories } from "./retrieval.js";
-import { loadTypeSafeApiKey } from "./secrets.js";
+import { loadTypeSafeApiKeyWithin } from "./secrets.js";
 import { approxTokens } from "./tokens.js";
 import { TypeSafeRelevanceEvaluator, type RelevanceEvaluator } from "./typesafe.js";
 
@@ -11,6 +11,8 @@ export type RecallHarness = (typeof RECALL_HARNESSES)[number];
 export type RecallMode = "manual" | "automatic" | "off";
 export const HOOK_TIMEOUT_SECONDS = 5;
 const RELEVANCE_TIMEOUT_MS = 1500;
+const KEYCHAIN_TIMEOUT_MS = 500;
+const MIN_AUTOMATIC_WORDS = 2;
 const MAX_INPUT_BYTES = 1024 * 1024;
 const MAX_CONTEXT_TOKENS = 1800;
 
@@ -62,8 +64,14 @@ function recallRequest(prompt: string, harness: RecallHarness, mode: RecallMode)
     : /^(?:\$recall|\[\$?recall\]\([^\r\n)]+\))(?=\s|$)/;
   const match = prefix.exec(text);
   if (match) return { manual: true, query: text.slice(match[0].length).trim() };
-  if (mode === "automatic" && text) return { manual: false, query: text };
+  if (mode === "automatic" && worthAutomaticRecall(text)) return { manual: false, query: text };
   return undefined;
+}
+
+/** Skip host commands (/compact, $skill) and one-word replies (ok, yes) that cannot steer retrieval. */
+function worthAutomaticRecall(text: string): boolean {
+  if (!text || text.startsWith("/") || text.startsWith("$")) return false;
+  return text.split(/\s+/).length >= MIN_AUTOMATIC_WORDS;
 }
 
 export function renderRecallContext(context: Record<string, unknown>): string {
@@ -75,6 +83,22 @@ export function renderRecallContext(context: Record<string, unknown>): string {
     "In automatic mode, use relevant memories quietly and continue the task without reporting recall status.",
     `<context_eng_recall>\n${data}\n</context_eng_recall>`,
   ].join("\n");
+}
+
+const TRUNCATED_SUFFIX = " …[truncated]";
+
+/** Keep the longest prefix of one oversized memory that still fits, instead of dropping it whole. */
+function truncateToFit(memory: { content: string }, fits: () => boolean): void {
+  const original = memory.content;
+  let low = 0;
+  let high = original.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    memory.content = original.slice(0, mid).trimEnd() + TRUNCATED_SUFFIX;
+    if (fits()) low = mid;
+    else high = mid - 1;
+  }
+  memory.content = low > 0 ? original.slice(0, low).trimEnd() + TRUNCATED_SUFFIX : original;
 }
 
 function hookOutput(additionalContext: string): string {
@@ -111,7 +135,7 @@ export async function recallHook(raw: unknown, options: RecallHookOptions): Prom
     if (options.local) {
       evaluator = undefined;
     } else if (!evaluator) {
-      const loaded = await loadTypeSafeApiKey();
+      const loaded = await loadTypeSafeApiKeyWithin(KEYCHAIN_TIMEOUT_MS);
       if (loaded.warning) process.stderr.write(`${loaded.warning}\n`);
       evaluator = new TypeSafeRelevanceEvaluator({ apiKey: loaded.apiKey, timeoutMs: RELEVANCE_TIMEOUT_MS });
     }
@@ -129,11 +153,16 @@ export async function recallHook(raw: unknown, options: RecallHookOptions): Prom
       message: memories.length ? "" : "no matching memory.",
       memories,
     };
-    while (memories.length && approxTokens(renderRecallContext(context)) > MAX_CONTEXT_TOKENS) memories.pop();
+    const fits = () => approxTokens(renderRecallContext(context)) <= MAX_CONTEXT_TOKENS;
+    while (memories.length > 1 && !fits()) memories.pop();
+    if (memories.length === 1 && !fits()) truncateToFit(memories[0]!, fits);
+    if (memories.length === 1 && !fits()) memories.pop();
     if (memories.length === 0 && result.hits.length > 0) {
       context.status = "empty";
       context.message = "No memories fit the hook context budget.";
     }
+    // Automatic recall stays silent when it has nothing to add, so empty turns cost no context.
+    if (!request.manual && context.status === "empty") return "";
     return hookOutput(renderRecallContext(context));
   } catch (error) {
     process.stderr.write(`[context-eng] Recall unavailable (${failureName(error)}); continuing without memories.\n`);
@@ -164,7 +193,7 @@ export async function runRecallHook(options: RecallHookOptions): Promise<void> {
   if (options.mode === "off") return;
   try {
     const output = await recallHook(await readHookInput(), options);
-    if (output) process.stdout.write(`${output}\n`);
+    if (output) await new Promise<void>((resolve) => process.stdout.write(`${output}\n`, () => resolve()));
   } catch (error) {
     process.stderr.write(`[context-eng] Invalid or failed recall hook (${failureName(error)}); continuing without memories.\n`);
   }
