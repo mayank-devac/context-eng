@@ -131,9 +131,17 @@ describe("prompt recall hooks", () => {
     expect(context(await recallHook(event("/recall"), { harness: "claude", mode: "manual", home })).status).toBe("usage");
     expect(existsSync(home)).toBe(false);
     expect(context(await recallHook(event("/recall login"), { harness: "claude", mode: "manual", home, local: true })).status).toBe("empty");
-    const automatic = context(await recallHook(event("Fix login"), { harness: "claude", mode: "automatic", home, local: true }));
-    expect(automatic.status).toBe("empty");
-    expect(automatic.manual).toBe(false);
+    expect(await recallHook(event("Fix login"), { harness: "claude", mode: "automatic", home, local: true })).toBe("");
+  });
+
+  it.each<RecallHarness>(["claude", "codex"])("skips host commands and one-word replies in %s automatic mode", async (harness) => {
+    seed("Login uses secure cookies.");
+    const evaluator = { evaluate: vi.fn(async (_query: string, hits: SearchHit[]) => hits.map(() => 0.9)) };
+    for (const prompt of ["ok", "  yes  ", "/compact", "/clear login", "$review login flow"]) {
+      expect(await recallHook(event(prompt), { harness, mode: "automatic", home, evaluator })).toBe("");
+    }
+    expect(evaluator.evaluate).not.toHaveBeenCalled();
+    expect(context(await recallHook(event("login cookies"), { harness, mode: "automatic", home, evaluator })).status).toBe("found");
   });
 
   it("falls back locally when semantic evaluation fails and continues when storage is unavailable", async () => {

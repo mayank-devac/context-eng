@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ensureTypeSafeKey, resolveTypeSafeApiKey, type SecretStore } from "../src/secrets.js";
+import { ensureTypeSafeKey, loadTypeSafeApiKeyWithin, resolveTypeSafeApiKey, type SecretStore } from "../src/secrets.js";
 
 function memoryStore(initial: string | null = null): SecretStore & { saved: string | null } {
   const state = { saved: initial };
@@ -36,6 +36,36 @@ describe("resolveTypeSafeApiKey", () => {
     });
     expect(resolved.apiKey).toBe("");
     expect(resolved.warning).toContain("locked");
+  });
+});
+
+describe("loadTypeSafeApiKeyWithin", () => {
+  it("uses TYPESAFE_API_KEY without touching the keychain", async () => {
+    const read = async () => { throw new Error("keychain must not be read"); };
+    await expect(loadTypeSafeApiKeyWithin(50, { TYPESAFE_API_KEY: " env-key " }, read)).resolves.toEqual({ apiKey: "env-key" });
+  });
+
+  it("returns a keychain key that answers in time", async () => {
+    await expect(loadTypeSafeApiKeyWithin(50, {}, async () => " saved-key ")).resolves.toEqual({ apiKey: "saved-key" });
+    await expect(loadTypeSafeApiKeyWithin(50, {}, async () => undefined)).resolves.toEqual({ apiKey: "" });
+  });
+
+  it("aborts a hanging keychain and stays local", async () => {
+    let aborted = false;
+    const read = (signal: AbortSignal) => new Promise<string>(() => {
+      signal.addEventListener("abort", () => { aborted = true; });
+    });
+    const started = Date.now();
+    const loaded = await loadTypeSafeApiKeyWithin(30, {}, read);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(aborted).toBe(true);
+    expect(loaded.apiKey).toBe("");
+    expect(loaded.warning).toContain("did not answer within 30 ms");
+  });
+
+  it("stays local when the keychain read fails", async () => {
+    const loaded = await loadTypeSafeApiKeyWithin(50, {}, async () => { throw new Error("locked"); });
+    expect(loaded).toEqual({ apiKey: "", warning: expect.stringContaining("locked") });
   });
 });
 

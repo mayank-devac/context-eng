@@ -460,7 +460,8 @@ export async function main(): Promise<void> {
       ...(values.project === undefined ? {} : { projectPath: resolveProjectPath(values.project) }),
       ...(values.local === undefined ? {} : { local: values.local }),
     });
-    return;
+    // A timed-out keychain read can still hold a native worker; exit so the host is not kept waiting.
+    process.exit(0);
   }
   if (values.mode !== undefined || values["context-eng-recall"] !== undefined) {
     throw new Error("--mode and --context-eng-recall are only supported by hook");
