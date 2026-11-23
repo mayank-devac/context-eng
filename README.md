@@ -8,12 +8,21 @@ Local project memory router for Codex and Claude Code. Memories live in one SQLi
 - Run the command from within your project repository, not from your home directory.
 
 ```bash
-npx -y context-eng init
+npx context-eng@0.1.3 init
 ```
 
 ```bash
 pnpm dlx context-eng init
 ```
+
+Alternatively, install or update the global command, then configure your memory tools:
+
+```sh
+npm install -g context-eng@0.1.3 --prefer-online --registry https://registry.npmjs.org &&
+context-eng init
+```
+
+The `&&` runs setup only if installation succeeds. Restart your app after setup so it can load the memory tools. To enable manual saving as well, see [Save a learning manually](#save-a-learning-manually).
 
 To set up a different folder than the one you are in:
 
@@ -178,11 +187,21 @@ npm test -- test/hooks.test.ts test/hook-install.test.ts test/engine.test.ts tes
 
 ## Save a learning manually
 
-Enable the postsession skill for a project from a durable installation:
+After configuring the memory tools with `init` above, enable the postsession skill for your project. Replace `/path/to/repo` with your project's absolute path.
+
+With a global installation:
 
 ```sh
 context-eng init --postsession manual --harness codex --scope project --project /path/to/repo
 ```
+
+Or use `npx` without a global installation:
+
+```sh
+npx context-eng@0.1.3 init --postsession manual --harness codex --scope project --project /path/to/repo
+```
+
+This command installs the manual saving skill only; it does not configure the memory tools. It works through `npx` because the skill uses the host's current model and connected tools, with no persistent hook command pointing into the temporary package cache.
 
 Restart Codex, then type `$postsession` or select the postsession skill. In Claude Code, install with `--harness claude`, restart, and type `/postsession`. Native skill invocation uses the current conversation and model. It does not read transcripts or call another model. Ordinary prompts do not invoke it. Codex uses `policy.allow_implicit_invocation: false` in `agents/openai.yaml`; Claude uses `disable-model-invocation: true` in `SKILL.md` ([Codex documentation](https://learn.chatgpt.com/docs/build-skills), [Claude documentation](https://code.claude.com/docs/en/skills)).
 

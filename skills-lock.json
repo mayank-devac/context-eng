@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "skills": {
+    "hook-development": {
+      "source": "anthropics/claude-plugins-official",
+      "commit": "65adb96f26deb662f6a993f74347d0ccd1a61a52",
+      "sourceType": "github",
+      "skillPath": "plugins/plugin-dev/skills/hook-development/SKILL.md",
+      "computedHash": "d63ebf171e14ada4500893bcf24f13c1ade6a0bd907415a67c16e55579b7bbdb"
+    }
+  }
+}
