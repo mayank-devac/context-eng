@@ -15,4 +15,4 @@ Memory keeps mistakes, decisions, preferences and habits so you do not relearn t
 
 ## Git attribution
 
-Do not add `Claude-Session` or `Co-Authored-By` lines to commit messages or pull request descriptions.
+Do not add `Claude-Session` lines or session links to commit messages or pull request descriptions. Keep the `Co-Authored-By` line.
