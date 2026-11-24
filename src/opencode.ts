@@ -1,8 +1,9 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { opencodeConfigDir } from "./harness.js";
-import { applyInstallChanges, type FileChange, type RecallInstallFileOps, type RecallInstallScope } from "./hook-install.js";
+import { applyInstallChanges, RECALL_OWNER, type RecallInstallScope } from "./hook-install.js";
 import { resolveProjectPath } from "./paths.js";
+import { fillTemplate, POSTSESSION_OWNER, postsessionInstructions } from "./postsession.js";
 
 // OpenCode has no shell prompt hook, so recall and postsession are installed as
 // custom commands (markdown templates) that ask the model to use the MCP tools.
@@ -16,13 +17,11 @@ export interface OpencodeCommandOptions {
   home: string;
   projectPath: string;
   env?: NodeJS.ProcessEnv;
-  /** Test-only filesystem seam. */
-  fileOps?: Partial<RecallInstallFileOps>;
 }
 
 const OWNERS: Record<OpencodeCommandName, string> = {
-  recall: "context-eng:recall",
-  postsession: "context-eng:postsession",
+  recall: RECALL_OWNER,
+  postsession: POSTSESSION_OWNER,
 };
 
 const PROJECT_BINDING = "Resolve the root of the project open in this OpenCode session. Pass that absolute projectPath to every " +
@@ -35,11 +34,6 @@ export function opencodeCommandsDir(
   return options.scope === "global"
     ? path.join(opencodeConfigDir(options.home, options.env), "commands")
     : path.join(resolveProjectPath(options.projectPath), ".opencode", "commands");
-}
-
-/** Fills `{{key}}` placeholders literally; a replacer function keeps `$&`, `$$` and friends in values intact. */
-export function fillTemplate(text: string, values: Record<string, string>): string {
-  return text.replace(/\{\{(\w+)\}\}/g, (match, key: string) => values[key] ?? match);
 }
 
 function envFlagSet(value: string | undefined): boolean {
@@ -59,10 +53,8 @@ export interface OpencodeRulesFile {
  * OpenCode's global rules file: its AGENTS.md, or ~/.claude/CLAUDE.md while
  * AGENTS.md is absent and the Claude Code fallback is not turned off.
  */
-export function opencodeRulesFile(
-  home: string, env: NodeJS.ProcessEnv = process.env, configDir = opencodeConfigDir(home, env),
-): OpencodeRulesFile {
-  const agentsFile = path.join(configDir, "AGENTS.md");
+export function opencodeRulesFile(home: string, env: NodeJS.ProcessEnv = process.env): OpencodeRulesFile {
+  const agentsFile = path.join(opencodeConfigDir(home, env), "AGENTS.md");
   const claude = path.join(home, ".claude", "CLAUDE.md");
   const fallbackDisabled = envFlagSet(env.OPENCODE_DISABLE_CLAUDE_CODE) || envFlagSet(env.OPENCODE_DISABLE_CLAUDE_CODE_PROMPT);
   const claudeFallback = !existsSync(agentsFile) && existsSync(claude) && !fallbackDisabled;
@@ -70,14 +62,10 @@ export function opencodeRulesFile(
 }
 
 function template(name: OpencodeCommandName): string {
-  if (name === "recall") {
-    return readFileSync(new URL("../system_prompts/recall/opencode/recall.md", import.meta.url), "utf8");
-  }
-  const instructions = readFileSync(new URL("../system_prompts/postsession.md", import.meta.url), "utf8").trim();
-  return fillTemplate(
-    readFileSync(new URL("../system_prompts/postsession/opencode/postsession.md", import.meta.url), "utf8"),
-    { instructions, project_binding: PROJECT_BINDING },
-  );
+  const text = readFileSync(new URL(`../system_prompts/${name}/opencode/${name}.md`, import.meta.url), "utf8");
+  return name === "recall"
+    ? text
+    : fillTemplate(text, { instructions: postsessionInstructions(), project_binding: PROJECT_BINDING });
 }
 
 /** Installs (or with enabled false, removes) one owned OpenCode command file. Returns the files changed. */
@@ -93,7 +81,6 @@ export function installOpencodeCommand(options: OpencodeCommandOptions): string[
   }
   const content = options.enabled ? template(options.name) : null;
   if (current === content) return [];
-  const changes: FileChange[] = [{ file, content }];
-  applyInstallChanges(changes, `OpenCode ${options.name} command`, options.fileOps);
+  applyInstallChanges([{ file, content }], `OpenCode ${options.name} command`);
   return [file];
 }

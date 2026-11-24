@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { existingOpencodeServer, PACKAGE_NAME } from "./harness.js";
+import { existingOpencodeServer, opencodeConfigDir, opencodeConfigFiles, PACKAGE_NAME } from "./harness.js";
 import { plainObject } from "./json-config.js";
 import { opencodeRulesFile } from "./opencode.js";
 import { MARKER_START } from "./pointer-block.js";
@@ -119,25 +119,37 @@ function codexServer(file: string, exists: Exists): DoctorFinding[] {
   return [checkLaunch(file, "MCP server", [command, ...args], exists)];
 }
 
-function opencodeServer(file: string, exists: Exists): DoctorFinding[] {
+/** One OpenCode config file, looked up once and shared by the server and instructions checks. */
+interface OpencodeConfig {
+  file: string;
+  text: string | null;
+  found: boolean;
+  value?: unknown;
+  /** Set when the file exists but could not be read as an OpenCode config. */
+  error?: string;
+}
+
+function readOpencodeConfig(file: string): OpencodeConfig {
   const text = readOptional(file);
-  if (text === null) return [];
-  let current: { found: boolean; value?: unknown };
   try {
     // The same lookup init uses: JSONC-tolerant, V2 `mcp.servers` first, then the legacy entry.
-    current = existingOpencodeServer(text);
+    return { file, text, ...existingOpencodeServer(text) };
   } catch (error) {
-    // A broken config that never mentions context-eng is OpenCode's problem, not a context-eng launch.
-    if (!text.includes(PACKAGE_NAME)) return [];
-    const message = error instanceof Error ? error.message : String(error);
-    return [{ level: "error", file, what: "MCP server", message }];
+    return { file, text, found: false, error: error instanceof Error ? error.message : String(error) };
   }
-  if (!current.found || !plainObject(current.value)) return [];
+}
+
+function opencodeServer({ file, text, found, value, error }: OpencodeConfig, exists: Exists): DoctorFinding[] {
+  if (error !== undefined) {
+    // A broken config that never mentions context-eng is OpenCode's problem, not a context-eng launch.
+    return text?.includes(PACKAGE_NAME) === true ? [{ level: "error", file, what: "MCP server", message: error }] : [];
+  }
+  if (!found || !plainObject(value)) return [];
   // A remote server is reached over its URL; there is no local command to check.
-  if (current.value.type === "remote") {
+  if (value.type === "remote") {
     return [{ level: "ok", file, what: "MCP server", message: "remote server; no local launch to check" }];
   }
-  const { command } = current.value;
+  const { command } = value;
   if (!Array.isArray(command) || command.length === 0) {
     return [{ level: "error", file, what: "MCP server", message: "command must be a non-empty array" }];
   }
@@ -149,16 +161,8 @@ function opencodeServer(file: string, exists: Exists): DoctorFinding[] {
  * while AGENTS.md is absent. init writes the instructions into whichever it
  * loads then, so creating AGENTS.md later silently drops them. Warn about that.
  */
-function opencodeInstructions(home: string, opencodeDir: string, env: NodeJS.ProcessEnv): DoctorFinding[] {
-  const configured = ["opencode.json", "opencode.jsonc"].some((name) => {
-    try {
-      return existingOpencodeServer(readOptional(path.join(opencodeDir, name))).found;
-    } catch {
-      return false;
-    }
-  });
-  if (!configured) return [];
-  const rules = opencodeRulesFile(home, env, opencodeDir);
+function opencodeInstructions(home: string, env: NodeJS.ProcessEnv): DoctorFinding[] {
+  const rules = opencodeRulesFile(home, env);
   if (readOptional(rules.file)?.includes(MARKER_START) === true) return [];
   return [{
     level: "warn", file: rules.file, what: "OpenCode instructions",
@@ -191,20 +195,23 @@ function hookFile(file: string, exists: Exists): DoctorFinding[] {
 }
 
 export function runDoctor(input: {
-  home: string; projectPath: string; exists?: Exists; opencodeDir?: string; env?: NodeJS.ProcessEnv;
+  home: string; projectPath: string; exists?: Exists; env?: NodeJS.ProcessEnv;
 }): DoctorFinding[] {
   const exists = input.exists ?? existsSync;
   const { home, projectPath } = input;
-  const opencodeDir = input.opencodeDir ?? path.join(home, ".config", "opencode");
-  const opencodeFiles = [...new Set([opencodeDir, projectPath, path.join(projectPath, ".opencode")]
-    .flatMap((dir) => ["opencode.json", "opencode.jsonc"].map((name) => path.join(dir, name))))];
+  const env = input.env ?? {};
+  const opencodeDir = opencodeConfigDir(home, env);
+  const globalOpencodeFiles: readonly string[] = opencodeConfigFiles(opencodeDir);
+  const opencodeConfigs = [...new Set([opencodeDir, projectPath, path.join(projectPath, ".opencode")]
+    .flatMap((dir) => opencodeConfigFiles(dir)))].map(readOpencodeConfig);
+  const opencodeConfigured = opencodeConfigs.some((config) => config.found && globalOpencodeFiles.includes(config.file));
   return [
     ...jsonServer(path.join(home, ".claude.json"), exists),
     ...jsonServer(path.join(home, ".cursor", "mcp.json"), exists),
     ...jsonServer(path.join(projectPath, ".cursor", "mcp.json"), exists),
     ...codexServer(path.join(home, ".codex", "config.toml"), exists),
-    ...opencodeFiles.flatMap((file) => opencodeServer(file, exists)),
-    ...opencodeInstructions(home, opencodeDir, input.env ?? {}),
+    ...opencodeConfigs.flatMap((config) => opencodeServer(config, exists)),
+    ...(opencodeConfigured ? opencodeInstructions(home, env) : []),
     ...hookFile(path.join(home, ".claude", "settings.json"), exists),
     ...hookFile(path.join(projectPath, ".claude", "settings.json"), exists),
     ...hookFile(path.join(projectPath, ".claude", "settings.local.json"), exists),

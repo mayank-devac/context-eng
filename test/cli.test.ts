@@ -30,7 +30,6 @@ import {
   cursorRulePath,
   globalClaudeAgentsPath,
   globalCursorRulePath,
-  opencodeAgentsPath,
   promptHookSetup,
   resolveCursorRuleScope,
   upsertMarkedBlock,
@@ -43,6 +42,7 @@ import {
   writeGlobalClaudePointer,
   writeOpencodeAgentsPointer,
 } from "../src/cli.js";
+import { opencodeRulesFile } from "../src/opencode.js";
 import { resolveProjectPath } from "../src/paths.js";
 
 const BLOCK = `<!-- context-eng:start -->
@@ -157,8 +157,8 @@ describe("writeOpencodeAgentsPointer", () => {
   }
 
   it("points at AGENTS.md in the OpenCode config dir", () => {
-    expect(opencodeAgentsPath("/tmp/home", {})).toBe(path.join("/tmp/home", ".config", "opencode", "AGENTS.md"));
-    expect(opencodeAgentsPath("/tmp/home", { XDG_CONFIG_HOME: "/xdg" })).toBe(path.join("/xdg", "opencode", "AGENTS.md"));
+    expect(opencodeRulesFile("/tmp/home", {}).agentsFile).toBe(path.join("/tmp/home", ".config", "opencode", "AGENTS.md"));
+    expect(opencodeRulesFile("/tmp/home", { XDG_CONFIG_HOME: "/xdg" }).agentsFile).toBe(path.join("/xdg", "opencode", "AGENTS.md"));
   });
 
   it("upserts into an existing OpenCode AGENTS.md and keeps its content", () => {

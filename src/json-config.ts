@@ -69,7 +69,7 @@ export function stripJsonc(text: string): string {
     out += noComments[i];
     i += 1;
   }
-  return out === text ? text : out;
+  return out;
 }
 
 /** Like parseJsonObject, but also accepts the comments and trailing commas OpenCode allows in its configs. */

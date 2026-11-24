@@ -13,7 +13,6 @@ import {
   validateDurableRuntime,
   validateHookRuntime,
   type HookRuntime,
-  type RecallInstallOptions,
 } from "./hook-install.js";
 import {
   RECALL_HARNESSES,
@@ -27,7 +26,6 @@ import {
   detectHarnesses,
   formatHarnessReport,
   installDetectedHarnesses,
-  opencodeConfigDir,
   pathHasCommand,
   promptHarnessChoice,
   type DurableRuntime,
@@ -159,10 +157,6 @@ export function writeCodexAgentsPointer(block: string, home = os.homedir()): str
   mkdirSync(path.dirname(file), { recursive: true });
   writePointer(file, block);
   return file;
-}
-
-export function opencodeAgentsPath(home = os.homedir(), env: NodeJS.ProcessEnv = process.env): string {
-  return opencodeRulesFile(home, env).agentsFile;
 }
 
 /**
@@ -388,6 +382,17 @@ function parseSetupHarness(value: string): SetupHarness {
   return value;
 }
 
+function installedSetupHarnesses(home: string): SetupHarness[] {
+  return detectHarnesses({ home, hasCommand: pathHasCommand })
+    .filter((hit) => hit.installed)
+    .map((hit) => hit.id)
+    .filter(isSetupHarness);
+}
+
+async function chooseSetupHarnesses(ids: readonly SetupHarness[]): Promise<SetupHarness[]> {
+  return (await promptHarnessChoice(ids)).filter(isSetupHarness);
+}
+
 async function configureMemoryHooks(
   values: CliOptions, setup: HookSetup, selectedHarnesses?: readonly SetupHarness[],
 ): Promise<void> {
@@ -407,24 +412,15 @@ async function configureMemoryHooks(
   ].filter((id): id is SetupHarness => id !== undefined);
   if (values.harness && only.length) throw new Error("use --harness or the --*-only flags, not both");
   const home = os.homedir();
+  const explicit = selectedHarnesses === undefined && (values.harness !== undefined || only.length > 0);
   let selected: readonly SetupHarness[];
-  let explicit = false;
   if (selectedHarnesses !== undefined) selected = selectedHarnesses;
-  else if (values.harness !== undefined) {
-    selected = [parseSetupHarness(values.harness)];
-    explicit = true;
-  } else if (only.length) {
-    selected = only;
-    explicit = true;
-  } else if (disabled) selected = SETUP_HARNESSES;
+  else if (values.harness !== undefined) selected = [parseSetupHarness(values.harness)];
+  else if (only.length) selected = only;
+  else if (disabled) selected = SETUP_HARNESSES;
   else {
-    const installed = detectHarnesses({ home, hasCommand: pathHasCommand })
-      .filter((hit) => hit.installed)
-      .map((hit) => hit.id)
-      .filter(isSetupHarness);
-    selected = process.stdin.isTTY === true && values.yes !== true
-      ? (await promptHarnessChoice(installed)).filter(isSetupHarness)
-      : installed;
+    const installed = installedSetupHarnesses(home);
+    selected = process.stdin.isTTY === true && values.yes !== true ? await chooseSetupHarnesses(installed) : installed;
   }
   if (!selected.length) throw new Error("No hook host selected. Use --harness claude, codex, or opencode.");
   const automatic = setup.kind === "recall" && setup.mode === "automatic";
@@ -432,26 +428,22 @@ async function configureMemoryHooks(
     throw new Error("OpenCode has no prompt hook, so its recall is manual only. Use --recall manual for --harness opencode.");
   }
   for (const id of selected) {
-    if (id === "opencode") {
-      const enabled = !disabled;
-      const files = installOpencodeCommand({ name: setup.kind, enabled, scope, home, projectPath });
-      const note = automatic ? " (OpenCode has no prompt hook; installed manual /recall instead)" : "";
-      console.log(`opencode ${setup.kind}: ${enabled ? "manual" : "off"}${files.length ? "" : " (unchanged)"}${note}`);
-      for (const file of files) console.log(`  ${file}`);
-      if (setup.kind === "recall" && enabled && values.local !== undefined) {
-        console.log("  --local does not apply to OpenCode; its /recall uses the context-eng MCP server.");
-      }
-      continue;
-    }
-    const common: Pick<RecallInstallOptions, "harness" | "scope" | "home" | "projectPath"> = {
-      harness: parseRecallHarness(id), scope, home, projectPath,
-    };
-    const files = setup.kind === "recall"
-      ? installRecallHooks({ ...common, mode: setup.mode, ...(values.local === undefined ? {} : { local: values.local }) }).files
-      : installPostsessionHook({ ...common, enabled: setup.enabled });
-    const mode = setup.kind === "recall" ? setup.mode : setup.enabled ? "manual" : "off";
-    console.log(`${id} ${setup.kind}: ${mode}${files.length ? "" : " (unchanged)"}`);
+    const opencode = id === "opencode";
+    const files = opencode
+      ? installOpencodeCommand({ name: setup.kind, enabled: !disabled, scope, home, projectPath })
+      : setup.kind === "recall"
+        ? installRecallHooks({
+          harness: id, scope, home, projectPath, mode: setup.mode, ...(values.local === undefined ? {} : { local: values.local }),
+        }).files
+        : installPostsessionHook({ harness: id, scope, home, projectPath, enabled: setup.enabled });
+    // OpenCode has no prompt hook, so its enabled recall is always the manual /recall command.
+    const mode = disabled ? "off" : opencode || setup.kind === "postsession" ? "manual" : setup.mode;
+    const note = opencode && automatic ? " (OpenCode has no prompt hook; installed manual /recall instead)" : "";
+    console.log(`${id} ${setup.kind}: ${mode}${files.length ? "" : " (unchanged)"}${note}`);
     for (const file of files) console.log(`  ${file}`);
+    if (opencode && setup.kind === "recall" && !disabled && values.local !== undefined) {
+      console.log("  --local does not apply to OpenCode; its /recall uses the context-eng MCP server.");
+    }
   }
   if (!disabled) {
     console.log(setup.kind === "recall"
@@ -467,11 +459,7 @@ async function configureInteractiveHooks(values: CliOptions): Promise<void> {
   if (process.stdin.isTTY !== true || values.yes === true) return;
   const setup = await promptHookSetup();
   if (!setup) return;
-  const hosts = detectHarnesses({ home: os.homedir(), hasCommand: pathHasCommand })
-    .filter((hit) => hit.installed)
-    .map((hit) => hit.id)
-    .filter(isSetupHarness);
-  const selected = (await promptHarnessChoice(hosts)).filter(isSetupHarness);
+  const selected = await chooseSetupHarnesses(installedSetupHarnesses(os.homedir()));
   if (!selected.length) {
     console.log("No prompt-box hook host selected; skipped hook setup.");
     return;
@@ -526,10 +514,7 @@ export async function main(): Promise<void> {
   }
 
   if (command === "doctor") {
-    const home = os.homedir();
-    const findings = runDoctor({
-      home, projectPath: resolveProjectPath(values.project), opencodeDir: opencodeConfigDir(home), env: process.env,
-    });
+    const findings = runDoctor({ home: os.homedir(), projectPath: resolveProjectPath(values.project), env: process.env });
     console.log(formatDoctor(findings));
     process.exitCode = findings.some((item) => item.level !== "ok") ? 1 : 0;
     return;
@@ -702,12 +687,15 @@ export async function main(): Promise<void> {
         ? { confirmReplace: confirmHarnessReplacement }
         : {}),
     });
-    const claude = report.harnesses.find((item) => item.id === "claude");
-    if (canWriteGlobal && claude?.installed && !claude.skipped && !claude.error && !claude.preserved) {
+    // Global instructions go only to hosts whose MCP server this run registered or found in place.
+    const registered = (id: HarnessId) => {
+      const hit = report.harnesses.find((item) => item.id === id);
+      return canWriteGlobal && hit?.installed === true && !hit.skipped && !hit.error && !hit.preserved;
+    };
+    if (registered("claude")) {
       console.log(`  global Claude instructions: ${writeGlobalClaudePointer(block, home)}`);
     }
-    const opencode = report.harnesses.find((item) => item.id === "opencode");
-    if (canWriteGlobal && opencode?.installed && !opencode.skipped && !opencode.error && !opencode.preserved) {
+    if (registered("opencode")) {
       console.log(`  global OpenCode instructions: ${formatOpencodePointer(writeOpencodeAgentsPointer(block, home))}`);
     }
     console.log(formatHarnessReport(report));

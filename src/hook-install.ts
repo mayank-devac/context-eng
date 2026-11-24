@@ -6,7 +6,8 @@ import { type JsonObject, parseJsonObject, plainObject } from "./json-config.js"
 import { HOOK_TIMEOUT_SECONDS, type RecallHarness, type RecallMode } from "./hooks.js";
 import { resolveProjectPath } from "./paths.js";
 
-const OWNER = "context-eng:recall";
+/** Marks recall files context-eng owns (hook config, skills, commands). */
+export const RECALL_OWNER = "context-eng:recall";
 const OWNER_ARGUMENT = " --context-eng-recall";
 export type RecallInstallScope = "global" | "project";
 
@@ -279,7 +280,7 @@ export function installRecallHooks(options: RecallInstallOptions): RecallInstall
   for (const name of names) {
     const file = path.join(locations.skill, name);
     const current = readOptional(file);
-    if (current !== null && !current.includes(OWNER)) {
+    if (current !== null && !current.includes(RECALL_OWNER)) {
       if (active) throw new Error(`A different recall skill owns ${file}; left unchanged`);
       continue;
     }

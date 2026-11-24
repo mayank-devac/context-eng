@@ -7,8 +7,19 @@ import {
 import type { RecallHarness } from "./hooks.js";
 import { resolveProjectPath } from "./paths.js";
 
-const OWNER = "context-eng:postsession";
+/** Marks postsession files context-eng owns (skills, commands). */
+export const POSTSESSION_OWNER = "context-eng:postsession";
 const LEGACY_ARGUMENT = " --context-eng-postsession";
+
+/** Fills `{{key}}` placeholders literally; a replacer function keeps `$&`, `$$` and friends in values intact. */
+export function fillTemplate(text: string, values: Record<string, string>): string {
+  return text.replace(/\{\{(\w+)\}\}/g, (match, key: string) => values[key] ?? match);
+}
+
+/** The shared postsession instructions every harness's template embeds as `{{instructions}}`. */
+export function postsessionInstructions(): string {
+  return readFileSync(new URL("../system_prompts/postsession.md", import.meta.url), "utf8").trim();
+}
 
 export function parsePostsessionMode(value: string): boolean {
   if (value !== "manual" && value !== "on" && value !== "off") throw new Error("postsession must be manual or off (on is a deprecated alias for manual)");
@@ -52,20 +63,20 @@ export function installPostsessionHook(options: PostsessionInstallOptions): stri
     const file = path.join(skill, name);
     return { file, name, current: existsSync(file) ? readFileSync(file, "utf8") : null };
   });
-  const conflict = contents.find(({ current }) => current !== null && !current.includes(OWNER));
+  const conflict = contents.find(({ current }) => current !== null && !current.includes(POSTSESSION_OWNER));
   if (conflict && options.enabled) throw new Error(`A different postsession skill owns ${conflict.file}; left unchanged`);
   // Off preserves the entire managed skill if any managed file is user-owned.
   if (!conflict) {
-    const instructions = options.enabled
-      ? readFileSync(new URL("../system_prompts/postsession.md", import.meta.url), "utf8").trim()
-      : "";
+    const instructions = options.enabled ? postsessionInstructions() : "";
     const binding = options.scope === "project"
       ? `Resolve projectPath from this installed skill's location: <root>/${options.harness === "codex" ? ".agents" : ".claude"}/skills/postsession/SKILL.md belongs to <root>. Use that absolute root for every project-scoped memory tool, even from a nested working directory. Do not use the current directory or another project's binding. If the skill's project root is unclear or is not the current project, stop and report the mismatch before writing.`
       : "Resolve the current project root from the conversation and workspace. Pass that absolute projectPath to every project-scoped memory tool. If the correct root is unclear, ask before writing; never reuse another project's binding.";
     for (const { file, name, current } of contents) {
       const content = options.enabled
-        ? readFileSync(new URL(`../system_prompts/postsession/${options.harness}/${name}`, import.meta.url), "utf8")
-          .replace("{{instructions}}", instructions).replace("{{project_binding}}", binding)
+        ? fillTemplate(
+          readFileSync(new URL(`../system_prompts/postsession/${options.harness}/${name}`, import.meta.url), "utf8"),
+          { instructions, project_binding: binding },
+        )
         : null;
       if (current !== content) changes.push({ file, content });
     }

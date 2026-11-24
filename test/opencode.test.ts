@@ -2,8 +2,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { fillTemplate, installOpencodeCommand, opencodeCommandsDir } from "../src/opencode.js";
+import { installOpencodeCommand, opencodeCommandsDir } from "../src/opencode.js";
 import { resolveProjectPath } from "../src/paths.js";
+import { fillTemplate } from "../src/postsession.js";
 
 const dirs: string[] = [];
 function tempDir(): string {

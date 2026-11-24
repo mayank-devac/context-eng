@@ -129,7 +129,7 @@ describe("doctor", () => {
     mkdirSync(path.join(project, ".opencode"));
     writeFileSync(path.join(project, ".opencode", "opencode.jsonc"), "{\n  // no server here\n}\n");
 
-    const findings = runDoctor({ home, projectPath: project, exists, opencodeDir: dir });
+    const findings = runDoctor({ home, projectPath: project, exists });
     expect(findings.map((item) => [item.file.replace(home, "~").replace(project, "<project>"), item.level])).toEqual([
       ["~/.config/opencode/opencode.json", "ok"],
       ["~/.config/opencode/opencode.jsonc", "error"],
@@ -147,7 +147,7 @@ describe("doctor", () => {
     writeFileSync(path.join(dir, "opencode.json"), JSON.stringify({ mcp: {
       "context-eng": { type: "local", command: ["/good/node", "/good/cli-entry.js", "mcp"] },
     } }));
-    const instructions = (where: string) => runDoctor({ home, projectPath: project, exists, opencodeDir: dir, env: {} })
+    const instructions = (where: string) => runDoctor({ home, projectPath: project, exists, env: {} })
       .filter((item) => item.what === "OpenCode instructions").map((item) => item.file.replace(home, where));
 
     // OpenCode falls back to ~/.claude/CLAUDE.md while its AGENTS.md is absent.
@@ -166,15 +166,15 @@ describe("doctor", () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, "opencode.json"), '{\n  // theme only\n  "theme": "x",\n}\n');
     writeFileSync(path.join(project, "opencode.json"), "{");
-    expect(runDoctor({ home, projectPath: project, exists, opencodeDir: dir })).toEqual([]);
+    expect(runDoctor({ home, projectPath: project, exists })).toEqual([]);
 
     writeFileSync(path.join(project, "opencode.json"), JSON.stringify({
       mcp: { "context-eng": { type: "remote", url: "http://localhost:4000/mcp" } },
     }));
-    expect(runDoctor({ home, projectPath: project, exists, opencodeDir: dir }).map((item) => item.level)).toEqual(["ok"]);
+    expect(runDoctor({ home, projectPath: project, exists }).map((item) => item.level)).toEqual(["ok"]);
 
     writeFileSync(path.join(project, "opencode.json"), '{ "mcp": { "context-eng": ');
-    expect(runDoctor({ home, projectPath: project, exists, opencodeDir: dir }).map((item) => item.level)).toEqual(["error"]);
+    expect(runDoctor({ home, projectPath: project, exists }).map((item) => item.level)).toEqual(["error"]);
   });
 
   it("says so when nothing is configured", () => {
