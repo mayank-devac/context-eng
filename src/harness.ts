@@ -454,7 +454,9 @@ async function writeOpencode(
   const server = { type: "local", command: [launch.command, ...launch.args] };
   const existing = exists(file) ? readFileSync(file, "utf8") : null;
   const current = existingOpencodeServer(existing);
-  if (current.found && isDeepStrictEqual(current.value, server)) return { file, unchanged: true };
+  // Only the launch is init's; settings such as disabled, timeout or environment belong to the user.
+  const local = current.found && plainObject(current.value) && current.value.type === "local" ? current.value : undefined;
+  if (local !== undefined && isDeepStrictEqual(local.command, server.command)) return { file, unchanged: true };
   // OpenCode allows comments and trailing commas in .json and .jsonc alike;
   // rewriting the file would delete them, so ask for a hand edit instead.
   if (existing !== null && stripJsonc(existing) !== existing) {
@@ -462,7 +464,7 @@ async function writeOpencode(
       `"mcp": ${JSON.stringify({ [PACKAGE_NAME]: server })}`);
   }
   if (current.found && await confirmReplace?.("opencode", file) !== true) return { file, preserved: true };
-  writeConfigAtomically(file, upsertOpencodeJson(existing, server));
+  writeConfigAtomically(file, upsertOpencodeJson(existing, { ...local, ...server }));
   return { file };
 }
 

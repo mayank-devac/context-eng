@@ -458,6 +458,28 @@ describe("OpenCode", () => {
     expect(readFileSync(file, "utf8")).toBe(commented);
   });
 
+  it("treats user settings on the OpenCode entry as unchanged and keeps them on replace", async () => {
+    const home = tempHome();
+    const file = opencodeFile(home);
+    mkdirSync(path.dirname(file), { recursive: true });
+    const extras = { disabled: false, timeout: { catalog: 30000 }, environment: { KEY: "v" } };
+    const tuned = JSON.stringify({ mcp: { servers: { "context-eng": { ...server, ...extras } } } });
+    writeFileSync(file, tuned, "utf8");
+    expect((await installDetectedHarnesses({ home, hasCommand: npx, env: {} })).harnesses[3])
+      .toMatchObject({ unchanged: true, file });
+    expect(readFileSync(file, "utf8")).toBe(tuned);
+
+    writeFileSync(file, JSON.stringify({ mcp: { servers: {
+      "context-eng": { type: "local", command: ["node", "old.js"], ...extras },
+    } } }), "utf8");
+    await installDetectedHarnesses({ home, hasCommand: npx, env: {}, confirmReplace: () => true });
+    expect(JSON.parse(readFileSync(file, "utf8")).mcp.servers["context-eng"]).toEqual({ ...server, ...extras });
+
+    writeFileSync(file, JSON.stringify({ mcp: { "context-eng": { type: "remote", url: "http://x/mcp" } } }), "utf8");
+    await installDetectedHarnesses({ home, hasCommand: npx, env: {}, confirmReplace: () => true });
+    expect(JSON.parse(readFileSync(file, "utf8")).mcp["context-eng"]).toEqual(server);
+  });
+
   it("reads comments in a plain opencode.json: unchanged when current, hand-edit error otherwise", async () => {
     const home = tempHome();
     const file = opencodeFile(home);
