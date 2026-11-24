@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { parseJsonObject, plainObject } from "./json-config.js";
+import { parseJsonObject, parseJsoncObject, plainObject, stripJsonc } from "./json-config.js";
 
 export const PACKAGE_NAME = "context-eng";
 
@@ -147,7 +147,7 @@ function hasV2Servers(mcp: Record<string, unknown>): boolean {
 /** The context-eng entry OpenCode would load: V2 `mcp.servers` first, then the legacy direct entry. */
 export function existingOpencodeServer(existing: string | null): { found: boolean; value?: unknown } {
   if (existing === null || existing.trim() === "") return { found: false };
-  const root = parseJsonObject(existing, "OpenCode config");
+  const root = parseJsoncObject(existing, "OpenCode config");
   if (root.mcp === undefined) return { found: false };
   if (!plainObject(root.mcp)) throw new Error("mcp must be a JSON object");
   const mcp = root.mcp;
@@ -453,18 +453,15 @@ async function writeOpencode(
   const file = opencodeConfigFile(home, exists, env);
   const server = { type: "local", command: [launch.command, ...launch.args] };
   const existing = exists(file) ? readFileSync(file, "utf8") : null;
-  let current: { found: boolean; value?: unknown };
-  try {
-    current = existingOpencodeServer(existing);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const hint = file.endsWith(".jsonc") ? "; JSONC comments are not edited, add the server by hand" : "";
-    throw new Error(`${message}${hint}`, { cause: error });
+  const current = existingOpencodeServer(existing);
+  if (current.found && isDeepStrictEqual(current.value, server)) return { file, unchanged: true };
+  // OpenCode allows comments and trailing commas in .json and .jsonc alike;
+  // rewriting the file would delete them, so ask for a hand edit instead.
+  if (existing !== null && stripJsonc(existing) !== existing) {
+    throw new Error("config has comments or trailing commas, which init would delete; add the server by hand under " +
+      `"mcp": ${JSON.stringify({ [PACKAGE_NAME]: server })}`);
   }
-  if (current.found) {
-    if (isDeepStrictEqual(current.value, server)) return { file, unchanged: true };
-    if (await confirmReplace?.("opencode", file) !== true) return { file, preserved: true };
-  }
+  if (current.found && await confirmReplace?.("opencode", file) !== true) return { file, preserved: true };
   writeConfigAtomically(file, upsertOpencodeJson(existing, server));
   return { file };
 }

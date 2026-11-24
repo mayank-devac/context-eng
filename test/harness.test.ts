@@ -458,6 +458,23 @@ describe("OpenCode", () => {
     expect(readFileSync(file, "utf8")).toBe(commented);
   });
 
+  it("reads comments in a plain opencode.json: unchanged when current, hand-edit error otherwise", async () => {
+    const home = tempHome();
+    const file = opencodeFile(home);
+    mkdirSync(path.dirname(file), { recursive: true });
+    const current = `{\n  // mine\n  "mcp": { "context-eng": ${JSON.stringify(server)}, },\n}\n`;
+    writeFileSync(file, current, "utf8");
+    expect((await installDetectedHarnesses({ home, hasCommand: npx, env: {} })).harnesses[3])
+      .toMatchObject({ file, unchanged: true });
+
+    const missing = '{\n  // mine\n  "mcp": {}\n}\n';
+    writeFileSync(file, missing, "utf8");
+    const report = await installDetectedHarnesses({ home, hasCommand: npx, env: {} });
+    expect(report.harnesses[3]?.error).toContain("add the server by hand");
+    expect(report.harnesses[3]?.error).toContain('"context-eng"');
+    expect(readFileSync(file, "utf8")).toBe(missing);
+  });
+
   it("prefers opencode.json when both files exist and reports invalid JSON untouched", async () => {
     const home = tempHome();
     mkdirSync(path.join(home, ".config", "opencode"), { recursive: true });
