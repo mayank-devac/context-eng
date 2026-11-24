@@ -5,9 +5,16 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { main } from "../src/cli.js";
-import { installRecallHooks, recallHookCommand, type RecallInstallOptions } from "../src/hook-install.js";
+import {
+  installRecallHooks,
+  recallHookCommand,
+  validateDurableRuntime,
+  validateHookRuntime,
+  type RecallInstallOptions,
+} from "../src/hook-install.js";
 import { writeConfigAtomically } from "../src/harness.js";
 import type { RecallHarness } from "../src/hooks.js";
 
@@ -285,5 +292,29 @@ describe.skipIf(process.platform === "win32")("recall installation", () => {
     } finally {
       process.argv = original;
     }
+  });
+});
+
+// The MCP launch uses validateDurableRuntime, so Windows gets the absolute
+// node.exe + cli-entry.js launch even though prompt hooks stay POSIX-only.
+describe("durable runtime on Windows", () => {
+  const realPlatform = process.platform;
+  afterEach(() => {
+    Object.defineProperty(process, "platform", { value: realPlatform });
+  });
+
+  it("accepts an installed runtime for the MCP launch but still refuses hooks", () => {
+    const runtime = { nodePath: process.execPath, entryPath: fileURLToPath(import.meta.url) };
+    Object.defineProperty(process, "platform", { value: "win32" });
+    expect(() => validateDurableRuntime(runtime)).not.toThrow();
+    expect(() => validateHookRuntime(runtime)).toThrow("supports macOS and Linux");
+  });
+
+  it("still rejects a Windows npx cache path", () => {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    expect(() => validateDurableRuntime({
+      nodePath: process.execPath,
+      entryPath: "C:\\Users\\me\\AppData\\Local\\npm-cache\\_npx\\abc\\node_modules\\context-eng\\dist\\cli-entry.js",
+    })).toThrow("temporary package cache");
   });
 });

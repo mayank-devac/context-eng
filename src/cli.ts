@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +10,7 @@ import { Engine } from "./engine.js";
 import {
   currentHookRuntime,
   installRecallHooks,
+  validateDurableRuntime,
   validateHookRuntime,
   type HookRuntime,
   type RecallInstallOptions,
@@ -27,8 +29,10 @@ import {
   installDetectedHarnesses,
   pathHasCommand,
   promptHarnessChoice,
+  type DurableRuntime,
   type HarnessId,
 } from "./harness.js";
+import { formatDoctor, runDoctor } from "./doctor.js";
 import { runStdio } from "./mcp.js";
 import { resolveProjectPath } from "./paths.js";
 import { installPostsessionHook, parsePostsessionMode, runPostsessionHook } from "./postsession.js";
@@ -52,6 +56,7 @@ const CLAUDE_RULE_FILE = "context-eng-memory.md";
 
 const USAGE = `Usage:
   context-eng mcp [--project <path>]
+  context-eng doctor [--project <path>]
   context-eng recall --query <text> [--project <path>] [--scope global|project|both] [--limit <1-50>] [--local]
   context-eng init [--project <path>] [--yes]
   context-eng init --recall manual|automatic|off [--harness claude|codex] [--scope global|project] [--project <path>] [--local] [--yes]
@@ -268,6 +273,20 @@ export function writeClaudeRules(
   return files;
 }
 
+// The installed node + cli-entry.js, if this run is a stable install.
+// Returns undefined for a temporary npx/dlx cache or a tsx dev run, so init
+// falls back to npx and prints a warning.
+function durableMcpRuntime(): DurableRuntime | undefined {
+  try {
+    const runtime = currentHookRuntime();
+    validateDurableRuntime(runtime);
+    if (runtime.loader !== undefined) return undefined;
+    return { nodePath: runtime.nodePath, entryPath: runtime.entryPath };
+  } catch {
+    return undefined;
+  }
+}
+
 async function confirmHarnessReplacement(id: HarnessId, file: string): Promise<boolean> {
   const prompt = createInterface({ input: process.stdin, output: process.stdout });
   try {
@@ -432,8 +451,16 @@ export async function main(): Promise<void> {
   }
 
   const command = positionals[0];
-  if (command !== "mcp" && command !== "init" && command !== "recall" && command !== "hook" && command !== "postsession") {
+  if (command !== "mcp" && command !== "init" && command !== "recall" && command !== "hook" && command !== "postsession" &&
+    command !== "doctor") {
     usage();
+  }
+
+  if (command === "doctor") {
+    const findings = runDoctor({ home: os.homedir(), projectPath: resolveProjectPath(values.project) });
+    console.log(formatDoctor(findings));
+    process.exitCode = findings.some((item) => item.level !== "ok") ? 1 : 0;
+    return;
   }
 
   if (command === "postsession") {
@@ -590,10 +617,12 @@ export async function main(): Promise<void> {
       : process.stdin.isTTY === true
         ? await promptHarnessChoice(installed)
         : [];
+    const durable = durableMcpRuntime();
     const report = await installDetectedHarnesses({
       home,
       hasCommand: pathHasCommand,
       selected,
+      ...(durable !== undefined ? { durable } : {}),
       ...(process.stdin.isTTY === true && values.yes !== true
         ? { confirmReplace: confirmHarnessReplacement }
         : {}),

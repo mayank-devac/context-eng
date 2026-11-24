@@ -10,6 +10,7 @@ import {
   initialHarnessChoice,
   installDetectedHarnesses,
   mcpLaunch,
+  NPX_FALLBACK_WARNING,
   upsertMcpJson,
   upsertTomlSection,
   writeConfigAtomically,
@@ -29,16 +30,59 @@ afterEach(() => {
 
 describe("mcpLaunch", () => {
   it("uses npx when npx is available", () => {
-    expect(mcpLaunch((name) => name === "npx" || name === "pnpm")).toEqual({
+    expect(mcpLaunch((name) => name === "npx" || name === "pnpm", undefined, "linux")).toEqual({
       command: "npx",
       args: ["-y", "context-eng", "mcp"],
     });
   });
 
   it("uses pnpm dlx when npx is missing", () => {
-    expect(mcpLaunch((name) => name === "pnpm")).toEqual({
+    expect(mcpLaunch((name) => name === "pnpm", undefined, "linux")).toEqual({
       command: "pnpm",
       args: ["dlx", "context-eng", "mcp"],
+    });
+  });
+
+  it("wraps npx and pnpm dlx in cmd /c on Windows", () => {
+    expect(mcpLaunch((name) => name === "npx", undefined, "win32")).toEqual({
+      command: "cmd",
+      args: ["/c", "npx", "-y", "context-eng", "mcp"],
+    });
+    expect(mcpLaunch((name) => name === "pnpm", undefined, "win32")).toEqual({
+      command: "cmd",
+      args: ["/c", "pnpm", "dlx", "context-eng", "mcp"],
+    });
+  });
+
+  it("uses node.exe directly on Windows when a durable runtime is given", () => {
+    const durable = {
+      nodePath: "C:\\Program Files\\nodejs\\node.exe",
+      entryPath: "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\context-eng\\dist\\cli-entry.js",
+    };
+    expect(mcpLaunch((name) => name === "npx", durable, "win32")).toEqual({
+      command: durable.nodePath,
+      args: [durable.entryPath, "mcp"],
+    });
+  });
+
+  it("writes the cmd /c wrapper to Claude and Codex configs and still warns", async () => {
+    const home = tempHome();
+    mkdirSync(path.join(home, ".claude"));
+    mkdirSync(path.join(home, ".codex"));
+    const report = await installDetectedHarnesses({ home, hasCommand: (name) => name === "npx", platform: "win32" });
+    expect(JSON.parse(readFileSync(path.join(home, ".claude.json"), "utf8")).mcpServers["context-eng"]).toEqual({
+      type: "stdio", command: "cmd", args: ["/c", "npx", "-y", "context-eng", "mcp"],
+    });
+    expect(readFileSync(path.join(home, ".codex", "config.toml"), "utf8"))
+      .toContain('args = ["/c", "npx", "-y", "context-eng", "mcp"]');
+    expect(formatHarnessReport(report)).toContain(NPX_FALLBACK_WARNING);
+  });
+
+  it("uses absolute node + entry paths when a durable runtime is given", () => {
+    const durable = { nodePath: "/opt/node/bin/node", entryPath: "/opt/lib/context-eng/dist/cli-entry.js" };
+    expect(mcpLaunch((name) => name === "npx", durable)).toEqual({
+      command: "/opt/node/bin/node",
+      args: ["/opt/lib/context-eng/dist/cli-entry.js", "mcp"],
     });
   });
 });
@@ -142,6 +186,7 @@ describe("installDetectedHarnesses", () => {
       "  claude: not installed",
       `  codex: installed (~/.codex) -> ${path.join(home, ".codex", "config.toml")}`,
       "  server: npx -y context-eng mcp",
+      NPX_FALLBACK_WARNING,
     ].join("\n"));
     expect(JSON.parse(readFileSync(path.join(home, ".cursor", "mcp.json"), "utf8"))).toEqual({
       mcpServers: {
@@ -207,6 +252,33 @@ describe("installDetectedHarnesses", () => {
 
     expect(report.harnesses[1]).toMatchObject({ unchanged: true, file });
     expect(readFileSync(file, "utf8")).toBe(original);
+  });
+
+  it("replaces an old npx Claude server with the absolute launch only after confirmation", async () => {
+    const home = tempHome();
+    const file = path.join(home, ".claude.json");
+    const original = JSON.stringify({ mcpServers: {
+      "context-eng": { type: "stdio", command: "npx", args: ["-y", "context-eng", "mcp"] },
+    } });
+    writeFileSync(file, original, "utf8");
+    const durable = { nodePath: "/opt/node/bin/node", entryPath: "/opt/lib/context-eng/dist/cli-entry.js" };
+
+    const kept = await installDetectedHarnesses({ home, hasCommand: (name) => name === "npx", durable });
+    expect(kept.harnesses[1]).toMatchObject({ preserved: true, file });
+    expect(readFileSync(file, "utf8")).toBe(original);
+
+    const asked: string[] = [];
+    const replaced = await installDetectedHarnesses({
+      home,
+      hasCommand: (name) => name === "npx",
+      durable,
+      confirmReplace: (id) => { asked.push(id); return true; },
+    });
+    expect(asked).toEqual(["claude"]);
+    expect(JSON.parse(readFileSync(file, "utf8")).mcpServers["context-eng"]).toEqual({
+      type: "stdio", command: "/opt/node/bin/node", args: ["/opt/lib/context-eng/dist/cli-entry.js", "mcp"],
+    });
+    expect(formatHarnessReport(replaced)).not.toContain("warning:");
   });
 
   it("keeps a different Claude server unless replacement is accepted", async () => {

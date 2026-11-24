@@ -99,7 +99,7 @@ export function createServer(
 ): McpServer {
   const server = new McpServer({
     name: "context-eng",
-    version: "0.1.0",
+    version: "0.1.5",
   });
 
   server.registerTool(
