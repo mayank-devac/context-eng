@@ -42,6 +42,33 @@ export function fillTemplate(text: string, values: Record<string, string>): stri
   return text.replace(/\{\{(\w+)\}\}/g, (match, key: string) => values[key] ?? match);
 }
 
+function envFlagSet(value: string | undefined): boolean {
+  return value !== undefined && value !== "" && value !== "0" && value.toLowerCase() !== "false";
+}
+
+export interface OpencodeRulesFile {
+  /** The global rules file OpenCode loads. */
+  file: string;
+  /** OpenCode's own global AGENTS.md, whether or not it exists. */
+  agentsFile: string;
+  /** True when OpenCode reads ~/.claude/CLAUDE.md because its AGENTS.md is absent. */
+  claudeFallback: boolean;
+}
+
+/**
+ * OpenCode's global rules file: its AGENTS.md, or ~/.claude/CLAUDE.md while
+ * AGENTS.md is absent and the Claude Code fallback is not turned off.
+ */
+export function opencodeRulesFile(
+  home: string, env: NodeJS.ProcessEnv = process.env, configDir = opencodeConfigDir(home, env),
+): OpencodeRulesFile {
+  const agentsFile = path.join(configDir, "AGENTS.md");
+  const claude = path.join(home, ".claude", "CLAUDE.md");
+  const fallbackDisabled = envFlagSet(env.OPENCODE_DISABLE_CLAUDE_CODE) || envFlagSet(env.OPENCODE_DISABLE_CLAUDE_CODE_PROMPT);
+  const claudeFallback = !existsSync(agentsFile) && existsSync(claude) && !fallbackDisabled;
+  return { file: claudeFallback ? claude : agentsFile, agentsFile, claudeFallback };
+}
+
 function template(name: OpencodeCommandName): string {
   if (name === "recall") {
     return readFileSync(new URL("../system_prompts/recall/opencode/recall.md", import.meta.url), "utf8");

@@ -35,15 +35,14 @@ import {
 } from "./harness.js";
 import { formatDoctor, runDoctor } from "./doctor.js";
 import { runStdio } from "./mcp.js";
-import { installOpencodeCommand } from "./opencode.js";
+import { installOpencodeCommand, opencodeRulesFile, type OpencodeRulesFile } from "./opencode.js";
 import { resolveProjectPath } from "./paths.js";
+import { MARKER_END, MARKER_START } from "./pointer-block.js";
 import { installPostsessionHook, parsePostsessionMode, runPostsessionHook } from "./postsession.js";
 import { renderMemoryContext, retrieveMemories } from "./retrieval.js";
 import { ensureTypeSafeKey, loadTypeSafeApiKey, openOsKeychain } from "./secrets.js";
 import { TypeSafeRelevanceEvaluator } from "./typesafe.js";
 
-const MARKER_START = "<!-- context-eng:start -->";
-const MARKER_END = "<!-- context-eng:end -->";
 
 const CURSOR_RULE_FILE = "context-eng-memory.mdc";
 const CURSOR_RULE_FRONTMATTER = `---
@@ -163,36 +162,27 @@ export function writeCodexAgentsPointer(block: string, home = os.homedir()): str
 }
 
 export function opencodeAgentsPath(home = os.homedir(), env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(opencodeConfigDir(home, env), "AGENTS.md");
-}
-
-function envFlagSet(value: string | undefined): boolean {
-  return value !== undefined && value !== "" && value !== "0" && value.toLowerCase() !== "false";
+  return opencodeRulesFile(home, env).agentsFile;
 }
 
 /**
- * OpenCode's global rules file. Without ~/.config/opencode/AGENTS.md, OpenCode
- * reads ~/.claude/CLAUDE.md instead, so creating AGENTS.md would hide those
- * instructions. Write into whichever file OpenCode actually loads.
+ * Writes into the global rules file OpenCode actually loads (see
+ * opencodeRulesFile): AGENTS.md, or ~/.claude/CLAUDE.md while OpenCode falls
+ * back to it, since creating AGENTS.md would hide that file's instructions.
  */
 export function writeOpencodeAgentsPointer(
   block: string, home = os.homedir(), env: NodeJS.ProcessEnv = process.env,
-): { file: string; agentsFile: string; claudeFallback: boolean } {
-  const agents = opencodeAgentsPath(home, env);
-  const claude = globalClaudeAgentsPath(home);
-  const fallbackDisabled = envFlagSet(env.OPENCODE_DISABLE_CLAUDE_CODE) || envFlagSet(env.OPENCODE_DISABLE_CLAUDE_CODE_PROMPT);
-  if (!existsSync(agents) && existsSync(claude) && !fallbackDisabled) {
-    writePointer(claude, block);
-    return { file: claude, agentsFile: agents, claudeFallback: true };
-  }
-  mkdirSync(path.dirname(agents), { recursive: true });
-  writePointer(agents, block);
-  return { file: agents, agentsFile: agents, claudeFallback: false };
+): OpencodeRulesFile {
+  const rules = opencodeRulesFile(home, env);
+  mkdirSync(path.dirname(rules.file), { recursive: true });
+  writePointer(rules.file, block);
+  return rules;
 }
 
-function formatOpencodePointer(written: { file: string; agentsFile: string; claudeFallback: boolean }): string {
+function formatOpencodePointer(written: OpencodeRulesFile): string {
   return written.claudeFallback
-    ? `${written.file} (OpenCode reads it while ${written.agentsFile} is absent)`
+    ? `${written.file} (OpenCode reads it while ${written.agentsFile} is absent; Claude Code reads it too. ` +
+      "If you create that AGENTS.md later, rerun context-eng init --opencode-only)"
     : written.file;
 }
 
@@ -538,7 +528,7 @@ export async function main(): Promise<void> {
   if (command === "doctor") {
     const home = os.homedir();
     const findings = runDoctor({
-      home, projectPath: resolveProjectPath(values.project), opencodeDir: opencodeConfigDir(home),
+      home, projectPath: resolveProjectPath(values.project), opencodeDir: opencodeConfigDir(home), env: process.env,
     });
     console.log(formatDoctor(findings));
     process.exitCode = findings.some((item) => item.level !== "ok") ? 1 : 0;

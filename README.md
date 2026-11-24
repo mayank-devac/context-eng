@@ -215,7 +215,7 @@ Use `--scope project --project /path/to/repo` for project setup. It writes `.cla
 - **JSONC files.** `init` does not edit a JSONC file with comments. It reports an error and leaves the file unchanged, so add the entry by hand.
 - **Tool names.** OpenCode names the tools `context-eng_memory_search`, `context-eng_memory_create`, and so on.
 
-OpenCode's global rules file is `~/.config/opencode/AGENTS.md`. While that file does not exist, OpenCode reads `~/.claude/CLAUDE.md` instead. Creating `AGENTS.md` would hide those instructions, so in that case `init` writes the memory pointer into `~/.claude/CLAUDE.md`. Set `OPENCODE_DISABLE_CLAUDE_CODE=1` or `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1` to turn that fallback off; `init` then creates `AGENTS.md`.
+OpenCode's global rules file is `~/.config/opencode/AGENTS.md`. While that file does not exist, OpenCode reads `~/.claude/CLAUDE.md` instead. Creating `AGENTS.md` would hide those instructions, so in that case `init` writes the memory pointer into `~/.claude/CLAUDE.md`. Set `OPENCODE_DISABLE_CLAUDE_CODE=1` or `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1` to turn that fallback off; `init` then creates `AGENTS.md`. Claude Code reads that same file, so it sees the pointer too. If you create `~/.config/opencode/AGENTS.md` later, OpenCode stops reading `~/.claude/CLAUDE.md`; `context-eng doctor` warns about this, and `context-eng init --opencode-only` writes the pointer into the new file.
 
 OpenCode has no shell prompt hook, so recall and postsession are installed as [custom commands](https://opencode.ai/docs/commands/) instead:
 

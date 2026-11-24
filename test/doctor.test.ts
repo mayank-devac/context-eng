@@ -134,7 +134,29 @@ describe("doctor", () => {
       ["~/.config/opencode/opencode.json", "ok"],
       ["~/.config/opencode/opencode.jsonc", "error"],
       ["<project>/opencode.json", "warn"],
+      ["~/.config/opencode/AGENTS.md", "warn"],
     ]);
+  });
+
+  it("warns when the rules file OpenCode loads lost the context-eng instructions", () => {
+    const home = tempDir();
+    const project = tempDir();
+    const dir = path.join(home, ".config", "opencode");
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(path.join(home, ".claude"));
+    writeFileSync(path.join(dir, "opencode.json"), JSON.stringify({ mcp: {
+      "context-eng": { type: "local", command: ["/good/node", "/good/cli-entry.js", "mcp"] },
+    } }));
+    const instructions = (where: string) => runDoctor({ home, projectPath: project, exists, opencodeDir: dir, env: {} })
+      .filter((item) => item.what === "OpenCode instructions").map((item) => item.file.replace(home, where));
+
+    // OpenCode falls back to ~/.claude/CLAUDE.md while its AGENTS.md is absent.
+    writeFileSync(path.join(home, ".claude", "CLAUDE.md"), "# Claude\n<!-- context-eng:start -->\nx\n<!-- context-eng:end -->\n");
+    expect(instructions("~")).toEqual([]);
+
+    // Creating AGENTS.md later hides CLAUDE.md, so the instructions are gone.
+    writeFileSync(path.join(dir, "AGENTS.md"), "# Mine\n");
+    expect(instructions("~")).toEqual(["~/.config/opencode/AGENTS.md"]);
   });
 
   it("ignores configs without context-eng and accepts a remote context-eng server", () => {

@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { existingOpencodeServer, PACKAGE_NAME } from "./harness.js";
 import { plainObject } from "./json-config.js";
+import { opencodeRulesFile } from "./opencode.js";
+import { MARKER_START } from "./pointer-block.js";
 
 // `context-eng doctor`: read-only check of every place that launches
 // context-eng (MCP servers and prompt hooks). It reports two problems:
@@ -142,6 +144,28 @@ function opencodeServer(file: string, exists: Exists): DoctorFinding[] {
   return [checkLaunch(file, "MCP server", command.map(String), exists)];
 }
 
+/**
+ * OpenCode loads one global rules file: its AGENTS.md, or ~/.claude/CLAUDE.md
+ * while AGENTS.md is absent. init writes the instructions into whichever it
+ * loads then, so creating AGENTS.md later silently drops them. Warn about that.
+ */
+function opencodeInstructions(home: string, opencodeDir: string, env: NodeJS.ProcessEnv): DoctorFinding[] {
+  const configured = ["opencode.json", "opencode.jsonc"].some((name) => {
+    try {
+      return existingOpencodeServer(readOptional(path.join(opencodeDir, name))).found;
+    } catch {
+      return false;
+    }
+  });
+  if (!configured) return [];
+  const rules = opencodeRulesFile(home, env, opencodeDir);
+  if (readOptional(rules.file)?.includes(MARKER_START) === true) return [];
+  return [{
+    level: "warn", file: rules.file, what: "OpenCode instructions",
+    message: "OpenCode loads this file but it has no context-eng instructions; rerun context-eng init --opencode-only",
+  }];
+}
+
 function hookCommands(value: unknown, found: string[]): string[] {
   if (Array.isArray(value)) {
     for (const item of value) hookCommands(item, found);
@@ -167,7 +191,7 @@ function hookFile(file: string, exists: Exists): DoctorFinding[] {
 }
 
 export function runDoctor(input: {
-  home: string; projectPath: string; exists?: Exists; opencodeDir?: string;
+  home: string; projectPath: string; exists?: Exists; opencodeDir?: string; env?: NodeJS.ProcessEnv;
 }): DoctorFinding[] {
   const exists = input.exists ?? existsSync;
   const { home, projectPath } = input;
@@ -180,6 +204,7 @@ export function runDoctor(input: {
     ...jsonServer(path.join(projectPath, ".cursor", "mcp.json"), exists),
     ...codexServer(path.join(home, ".codex", "config.toml"), exists),
     ...opencodeFiles.flatMap((file) => opencodeServer(file, exists)),
+    ...opencodeInstructions(home, opencodeDir, input.env ?? {}),
     ...hookFile(path.join(home, ".claude", "settings.json"), exists),
     ...hookFile(path.join(projectPath, ".claude", "settings.json"), exists),
     ...hookFile(path.join(projectPath, ".claude", "settings.local.json"), exists),
