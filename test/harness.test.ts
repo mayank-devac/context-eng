@@ -11,7 +11,10 @@ import {
   installDetectedHarnesses,
   mcpLaunch,
   NPX_FALLBACK_WARNING,
+  opencodeConfigDir,
+  opencodeConfigFile,
   upsertMcpJson,
+  upsertOpencodeJson,
   upsertTomlSection,
   writeConfigAtomically,
 } from "../src/harness.js";
@@ -92,11 +95,12 @@ describe("detectHarnesses", () => {
     const home = tempHome();
     mkdirSync(path.join(home, ".cursor"));
     writeFileSync(path.join(home, ".claude.json"), "{}\n", "utf8");
-    const hits = detectHarnesses({ home, hasCommand: () => false });
+    const hits = detectHarnesses({ home, hasCommand: () => false, env: {} });
     expect(hits).toEqual([
       { id: "cursor", installed: true, via: "~/.cursor" },
       { id: "claude", installed: true, via: "~/.claude.json" },
       { id: "codex", installed: false, via: "not installed" },
+      { id: "opencode", installed: false, via: "not installed" },
     ]);
   });
 
@@ -179,12 +183,13 @@ describe("installDetectedHarnesses", () => {
     const home = tempHome();
     mkdirSync(path.join(home, ".cursor"));
     mkdirSync(path.join(home, ".codex"));
-    const report = await installDetectedHarnesses({ home, hasCommand: (name) => name === "npx" });
+    const report = await installDetectedHarnesses({ home, hasCommand: (name) => name === "npx", env: {} });
     expect(formatHarnessReport(report)).toBe([
       "Harnesses",
       `  cursor: installed (~/.cursor) -> ${path.join(home, ".cursor", "mcp.json")}`,
       "  claude: not installed",
       `  codex: installed (~/.codex) -> ${path.join(home, ".codex", "config.toml")}`,
+      "  opencode: not installed",
       "  server: npx -y context-eng mcp",
       NPX_FALLBACK_WARNING,
     ].join("\n"));
@@ -347,5 +352,130 @@ describe("installDetectedHarnesses", () => {
     const report = await installDetectedHarnesses({ home, hasCommand: (name) => name === "npx" });
     expect(report.harnesses[2]).toMatchObject({ preserved: true, file });
     expect(readFileSync(file, "utf8")).toBe(original);
+  });
+});
+
+describe("OpenCode", () => {
+  const npx = (name: string) => name === "npx";
+  const server = { type: "local", command: ["npx", "-y", "context-eng", "mcp"] };
+
+  function opencodeFile(home: string, name = "opencode.json"): string {
+    return path.join(home, ".config", "opencode", name);
+  }
+
+  it("detects OpenCode on PATH, by config dir, by ~/.opencode, and under XDG_CONFIG_HOME", () => {
+    const home = tempHome();
+    const find = (env: NodeJS.ProcessEnv, hasCommand: (name: string) => boolean = () => false) =>
+      detectHarnesses({ home, hasCommand, env }).find((hit) => hit.id === "opencode");
+    expect(find({})).toEqual({ id: "opencode", installed: false, via: "not installed" });
+    expect(find({}, (name: string) => name === "opencode")).toMatchObject({ installed: true, via: "opencode on PATH" });
+    mkdirSync(path.join(home, ".opencode"));
+    expect(find({})).toMatchObject({ installed: true, via: "~/.opencode" });
+    mkdirSync(path.join(home, ".config", "opencode"), { recursive: true });
+    expect(find({})).toMatchObject({ installed: true, via: "~/.config/opencode" });
+    const xdg = tempHome();
+    mkdirSync(path.join(xdg, "opencode"));
+    expect(opencodeConfigDir(home, { XDG_CONFIG_HOME: xdg })).toBe(path.join(xdg, "opencode"));
+    expect(opencodeConfigDir(home, { XDG_CONFIG_HOME: "relative" })).toBe(path.join(home, ".config", "opencode"));
+    expect(find({ XDG_CONFIG_HOME: xdg })).toMatchObject({ installed: true, via: path.join(xdg, "opencode") });
+  });
+
+  it("creates opencode.json with $schema and the legacy entry both V1 and V2 accept", async () => {
+    const home = tempHome();
+    mkdirSync(path.join(home, ".opencode"));
+    const report = await installDetectedHarnesses({ home, hasCommand: npx, env: {} });
+    expect(report.harnesses[3]).toMatchObject({ id: "opencode", file: opencodeFile(home) });
+    expect(JSON.parse(readFileSync(opencodeFile(home), "utf8"))).toEqual({
+      $schema: "https://opencode.ai/config.json",
+      mcp: { "context-eng": server },
+    });
+  });
+
+  it("writes into mcp.servers when the file already uses the V2 shape and drops a legacy duplicate", () => {
+    const next = JSON.parse(upsertOpencodeJson(JSON.stringify({
+      plugins: ["./plugins/a.js"],
+      mcp: { timeout: { startup: 1000 }, servers: { other: { type: "local", command: ["x"] } }, "context-eng": { type: "local", command: ["old"] } },
+    }), server)) as Record<string, unknown>;
+    expect(next).toEqual({
+      plugins: ["./plugins/a.js"],
+      mcp: { timeout: { startup: 1000 }, servers: { other: { type: "local", command: ["x"] }, "context-eng": server } },
+    });
+  });
+
+  it("keeps other legacy servers and settings", () => {
+    const next = JSON.parse(upsertOpencodeJson(JSON.stringify({
+      $schema: "https://opencode.ai/config.json",
+      plugin: ["./p.js"],
+      mcp: { blender: { type: "local", command: ["uv"], enabled: true } },
+    }), server)) as Record<string, unknown>;
+    expect(next).toEqual({
+      $schema: "https://opencode.ai/config.json",
+      plugin: ["./p.js"],
+      mcp: { blender: { type: "local", command: ["uv"], enabled: true }, "context-eng": server },
+    });
+  });
+
+  it("treats a legacy server literally named servers as a server, not the V2 map", () => {
+    const legacy = { servers: { type: "local", command: ["s"] } };
+    const next = JSON.parse(upsertOpencodeJson(JSON.stringify({ mcp: legacy }), server)) as { mcp: Record<string, unknown> };
+    expect(next.mcp).toEqual({ ...legacy, "context-eng": server });
+  });
+
+  it("leaves an identical entry alone and preserves a different one until replacement is accepted", async () => {
+    const home = tempHome();
+    const file = opencodeFile(home);
+    mkdirSync(path.dirname(file), { recursive: true });
+    const same = JSON.stringify({ mcp: { servers: { "context-eng": server } } });
+    writeFileSync(file, same, "utf8");
+    chmodSync(file, 0o600);
+    expect((await installDetectedHarnesses({ home, hasCommand: npx, env: {} })).harnesses[3])
+      .toMatchObject({ unchanged: true, file });
+    expect(readFileSync(file, "utf8")).toBe(same);
+
+    const different = JSON.stringify({ mcp: { "context-eng": { type: "local", command: ["node", "custom.js"] } } });
+    writeFileSync(file, different, "utf8");
+    expect((await installDetectedHarnesses({ home, hasCommand: npx, env: {} })).harnesses[3])
+      .toMatchObject({ preserved: true, file });
+    expect(readFileSync(file, "utf8")).toBe(different);
+
+    await installDetectedHarnesses({ home, hasCommand: npx, env: {}, confirmReplace: (id) => id === "opencode" });
+    expect(JSON.parse(readFileSync(file, "utf8")).mcp["context-eng"]).toEqual(server);
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
+  });
+
+  it("uses an existing opencode.jsonc but never edits one with comments", async () => {
+    const home = tempHome();
+    const file = opencodeFile(home, "opencode.jsonc");
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, '{ "$schema": "https://opencode.ai/config.json" }', "utf8");
+    expect((await installDetectedHarnesses({ home, hasCommand: npx, env: {} })).harnesses[3]).toMatchObject({ file });
+    expect(JSON.parse(readFileSync(file, "utf8")).mcp["context-eng"]).toEqual(server);
+
+    const commented = '{\n  // my servers\n  "mcp": {}\n}\n';
+    writeFileSync(file, commented, "utf8");
+    const report = await installDetectedHarnesses({ home, hasCommand: npx, env: {} });
+    expect(report.harnesses[3]?.error).toContain("add the server by hand");
+    expect(readFileSync(file, "utf8")).toBe(commented);
+  });
+
+  it("prefers opencode.json when both files exist and reports invalid JSON untouched", async () => {
+    const home = tempHome();
+    mkdirSync(path.join(home, ".config", "opencode"), { recursive: true });
+    writeFileSync(opencodeFile(home, "opencode.jsonc"), "{}", "utf8");
+    writeFileSync(opencodeFile(home), "{", "utf8");
+    expect(opencodeConfigFile(home, undefined, {})).toBe(opencodeFile(home));
+    const report = await installDetectedHarnesses({ home, hasCommand: npx, env: {} });
+    expect(report.harnesses[3]?.error).toContain("invalid JSON");
+    expect(readFileSync(opencodeFile(home), "utf8")).toBe("{");
+  });
+
+  it("writes the durable node + entry launch as one command array", async () => {
+    const home = tempHome();
+    mkdirSync(path.join(home, ".opencode"));
+    const durable = { nodePath: "/opt/node/bin/node", entryPath: "/opt/lib/context-eng/dist/cli-entry.js" };
+    await installDetectedHarnesses({ home, hasCommand: npx, env: {}, durable });
+    expect(JSON.parse(readFileSync(opencodeFile(home), "utf8")).mcp["context-eng"]).toEqual({
+      type: "local", command: ["/opt/node/bin/node", "/opt/lib/context-eng/dist/cli-entry.js", "mcp"],
+    });
   });
 });

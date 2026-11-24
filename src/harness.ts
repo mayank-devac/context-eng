@@ -17,7 +17,16 @@ import { isDeepStrictEqual } from "node:util";
 
 export const PACKAGE_NAME = "context-eng";
 
-export type HarnessId = "cursor" | "claude" | "codex";
+export type HarnessId = "cursor" | "claude" | "codex" | "opencode";
+
+export const OPENCODE_SCHEMA = "https://opencode.ai/config.json";
+
+/** OpenCode keeps its global config, rules and commands in $XDG_CONFIG_HOME/opencode, by default ~/.config/opencode. */
+export function opencodeConfigDir(home: string, env: NodeJS.ProcessEnv = process.env): string {
+  const xdg = env.XDG_CONFIG_HOME;
+  const base = xdg !== undefined && xdg !== "" && path.isAbsolute(xdg) ? xdg : path.join(home, ".config");
+  return path.join(base, "opencode");
+}
 
 export interface McpLaunch {
   command: string;
@@ -97,9 +106,11 @@ export function detectHarnesses(input: {
   home: string;
   hasCommand: (name: string) => boolean;
   exists?: (file: string) => boolean;
+  env?: NodeJS.ProcessEnv;
 }): HarnessHit[] {
   const exists = input.exists ?? existsSync;
   const present = (rel: string) => exists(path.join(input.home, rel));
+  const opencodeDir = opencodeConfigDir(input.home, input.env);
   return [
     locate("cursor", [
       [input.hasCommand("cursor"), "cursor on PATH"],
@@ -114,7 +125,77 @@ export function detectHarnesses(input: {
       [input.hasCommand("codex"), "codex on PATH"],
       [present(".codex"), "~/.codex"],
     ]),
+    locate("opencode", [
+      [input.hasCommand("opencode"), "opencode on PATH"],
+      [exists(opencodeDir), displayHomePath(input.home, opencodeDir)],
+      [present(".opencode"), "~/.opencode"],
+    ]),
   ];
+}
+
+function displayHomePath(home: string, file: string): string {
+  const rel = path.relative(home, file);
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel) ? `~/${rel.split(path.sep).join("/")}` : file;
+}
+
+function parseJsonObject(existing: string, label: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(existing);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`invalid JSON (${message})`, { cause: error });
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`${label} must be a JSON object`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function plainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** True when `mcp.servers` is the V2 server map, not a legacy server that happens to be named "servers". */
+function hasV2Servers(mcp: Record<string, unknown>): boolean {
+  return plainObject(mcp.servers) && typeof mcp.servers.type !== "string";
+}
+
+/** The context-eng entry OpenCode would load: V2 `mcp.servers` first, then the legacy direct entry. */
+export function existingOpencodeServer(existing: string | null): { found: boolean; value?: unknown } {
+  if (existing === null || existing.trim() === "") return { found: false };
+  const root = parseJsonObject(existing, "OpenCode config");
+  if (root.mcp === undefined) return { found: false };
+  if (!plainObject(root.mcp)) throw new Error("mcp must be a JSON object");
+  const mcp = root.mcp;
+  if (hasV2Servers(mcp)) {
+    const servers = mcp.servers as Record<string, unknown>;
+    if (Object.hasOwn(servers, PACKAGE_NAME)) return { found: true, value: servers[PACKAGE_NAME] };
+  }
+  return Object.hasOwn(mcp, PACKAGE_NAME) ? { found: true, value: mcp[PACKAGE_NAME] } : { found: false };
+}
+
+/**
+ * Writes the server where this file already keeps servers. A file that uses the
+ * V2 `mcp.servers` map gets the entry there (and loses any legacy duplicate);
+ * otherwise the legacy direct `mcp.<name>` entry is used, which OpenCode V1
+ * reads and V2 still accepts and migrates.
+ */
+export function upsertOpencodeJson(existing: string | null, server: Record<string, unknown>): string {
+  const blank = existing === null || existing.trim() === "";
+  const root: Record<string, unknown> = blank
+    ? { $schema: OPENCODE_SCHEMA }
+    : { ...parseJsonObject(existing, "OpenCode config") };
+  if (root.mcp !== undefined && !plainObject(root.mcp)) throw new Error("mcp must be a JSON object");
+  const mcp: Record<string, unknown> = { ...(root.mcp as Record<string, unknown> | undefined) };
+  if (hasV2Servers(mcp)) {
+    mcp.servers = { ...(mcp.servers as Record<string, unknown>), [PACKAGE_NAME]: server };
+    delete mcp[PACKAGE_NAME];
+  } else {
+    mcp[PACKAGE_NAME] = server;
+  }
+  root.mcp = mcp;
+  return `${JSON.stringify(root, null, 2)}\n`;
 }
 
 export function upsertMcpJson(
@@ -281,6 +362,7 @@ export async function installDetectedHarnesses(input: {
   confirmReplace?: (id: HarnessId, file: string) => Promise<boolean> | boolean;
   durable?: DurableRuntime;
   platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
 }): Promise<HarnessReport> {
   const launch = mcpLaunch(input.hasCommand, input.durable, input.platform);
   const exists = input.exists ?? existsSync;
@@ -296,7 +378,9 @@ export async function installDetectedHarnesses(input: {
       continue;
     }
     try {
-      const result = await writeHarness(hit.id, input.home, launch, exists, input.confirmReplace);
+      const result = hit.id === "opencode"
+        ? await writeOpencode(input.home, launch, exists, input.env, input.confirmReplace)
+        : await writeHarness(hit.id, input.home, launch, exists, input.confirmReplace);
       harnesses.push({ ...hit, ...result });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -379,8 +463,44 @@ function isMissingFile(error: unknown): boolean {
 type HarnessWriteResult = Pick<HarnessWrite, "file" | "unchanged" | "preserved">;
 type ConfirmReplace = (id: HarnessId, file: string) => Promise<boolean> | boolean;
 
+/** The global OpenCode config file init edits: opencode.json, else an existing opencode.jsonc. */
+export function opencodeConfigFile(
+  home: string, exists: (file: string) => boolean = existsSync, env?: NodeJS.ProcessEnv,
+): string {
+  const dir = opencodeConfigDir(home, env);
+  const json = path.join(dir, "opencode.json");
+  const jsonc = path.join(dir, "opencode.jsonc");
+  return !exists(json) && exists(jsonc) ? jsonc : json;
+}
+
+async function writeOpencode(
+  home: string,
+  launch: McpLaunch,
+  exists: (file: string) => boolean,
+  env?: NodeJS.ProcessEnv,
+  confirmReplace?: ConfirmReplace,
+): Promise<HarnessWriteResult> {
+  const file = opencodeConfigFile(home, exists, env);
+  const server = { type: "local", command: [launch.command, ...launch.args] };
+  const existing = exists(file) ? readFileSync(file, "utf8") : null;
+  let current: { found: boolean; value?: unknown };
+  try {
+    current = existingOpencodeServer(existing);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const hint = file.endsWith(".jsonc") ? "; JSONC comments are not edited, add the server by hand" : "";
+    throw new Error(`${message}${hint}`, { cause: error });
+  }
+  if (current.found) {
+    if (isDeepStrictEqual(current.value, server)) return { file, unchanged: true };
+    if (await confirmReplace?.("opencode", file) !== true) return { file, preserved: true };
+  }
+  writeConfigAtomically(file, upsertOpencodeJson(existing, server));
+  return { file };
+}
+
 async function writeHarness(
-  id: HarnessId,
+  id: Exclude<HarnessId, "opencode">,
   home: string,
   launch: McpLaunch,
   exists: (file: string) => boolean,

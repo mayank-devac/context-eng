@@ -21,7 +21,7 @@
 - `src/cli.ts`:
   - Use: Implements `context-eng mcp`, `init`, `recall`, and the host-facing `hook` entry point without auto-running on import.
   - Useful/used by: `cli-entry.ts` calls `main`; init validates the project, writes agent pointers, selects clients, and invokes `harness.ts` to register their servers.
-  - Contains: Argument parsing, usage validation, marked-block insertion/replacement, project initialization, global Codex and Claude pointers, client selection, conflict confirmation, an interactive recall/manual-saving wizard, terminal recall, manual/automatic/off recall setup, manual/off postsession setup with a deprecated on alias, and host/scope validation.
+  - Contains: Argument parsing, usage validation, marked-block insertion/replacement, project initialization, global Codex, Claude, and OpenCode pointers (OpenCode's goes into `~/.claude/CLAUDE.md` while OpenCode falls back to it), client selection, conflict confirmation, an interactive recall/manual-saving wizard, terminal recall, manual/automatic/off recall setup, manual/off postsession setup with a deprecated on alias, and host/scope validation.
 
 - `src/hooks.ts`:
   - Use: Retrieves context before Codex or Claude processes a submitted prompt.
@@ -46,7 +46,12 @@
 - `src/harness.ts`:
   - Use: Detects installed MCP clients and manages their user-level server registrations.
   - Useful/used by: `cli.ts` uses it after init selection, `hook-install.ts` reuses atomic configuration writing, and `test/harness.test.ts` covers config preservation and replacement.
-  - Contains: Cursor, Claude, and Codex detection; npm/pnpm launch selection; JSON and TOML updates; atomic writes beside resolved config targets; preservation of identical or conflicting existing registrations; and install reporting.
+  - Contains: Cursor, Claude, Codex, and OpenCode detection; npm/pnpm launch selection; JSON and TOML updates (OpenCode: V2 `mcp.servers` when the file already uses it, else the legacy `mcp.<name>` entry); atomic writes beside resolved config targets; preservation of identical or conflicting existing registrations; and install reporting.
+
+- `src/opencode.ts`:
+  - Use: Installs or removes OpenCode's `/recall` and `/postsession` custom commands, because OpenCode has no shell prompt hook.
+  - Useful/used by: `cli.ts` calls it from `init --recall` / `init --postsession` for the `opencode` harness; `test/opencode.test.ts` covers paths, ownership, and removal.
+  - Contains: Global (`<opencode config>/commands`) and project (`.opencode/commands`) paths, owner-marker checks, template rendering from `system_prompts/recall/opencode/` and `system_prompts/postsession/opencode/`, and the shared `applyInstallChanges` transaction.
 
 - `src/db.ts`:
   - Use: Opens category databases and scope catalogs, maintaining structured-label indexes and synchronized FTS5 content.

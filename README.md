@@ -1,6 +1,6 @@
 # context-eng 
 
-Local project memory router for Codex and Claude Code. Memories live in one SQLite database per each category, with SQLite FTS5 for local retrieval and TypeSafe Jev filtering for semantic relevance.
+Local project memory router for Codex, Claude Code, Cursor, and OpenCode. Memories live in one SQLite database per each category, with SQLite FTS5 for local retrieval and TypeSafe Jev filtering for semantic relevance.
 
 ## Use
 
@@ -16,7 +16,7 @@ npm install -g context-eng@latest --prefer-online --registry https://registry.np
 context-eng init
 ```
 
-The `&&` runs setup only if installation succeeds. Restart Claude Code, Codex, or Cursor after setup so they load the memory tools. To enable manual saving as well, see [Save a learning manually](#save-a-learning-manually).
+The `&&` runs setup only if installation succeeds. Restart Claude Code, Codex, Cursor, or OpenCode after setup so they load the memory tools. To enable manual saving as well, see [Save a learning manually](#save-a-learning-manually).
 
 A global install matters: `init` then writes the full path to `node` and to the installed `context-eng` into your app configs. Your apps start that exact file, in any folder, with no download and no lookup.
 
@@ -38,7 +38,7 @@ This works, but the apps then start the server with `npx -y context-eng mcp`, an
 npm install -g context-eng@latest --prefer-online --registry https://registry.npmjs.org
 ```
 
-Then restart Claude Code, Codex, or Cursor so they load the new version, and run `context-eng doctor`. You only need to rerun `context-eng init` if you also switched Node versions.
+Then restart Claude Code, Codex, Cursor, or OpenCode so they load the new version, and run `context-eng doctor`. You only need to rerun `context-eng init` if you also switched Node versions.
 
 From a checkout of this repo, `npm run update-device` does the same install, repairs a stale vite-plus `context-eng` link if it finds one, prints the installed version, and runs `doctor`.
 
@@ -50,7 +50,7 @@ context-eng doctor
 
 `doctor` only reads files. It never changes them. It checks every place that starts context-eng:
 
-- MCP servers in `~/.claude.json`, `~/.cursor/mcp.json`, `~/.codex/config.toml`
+- MCP servers in `~/.claude.json`, `~/.cursor/mcp.json`, `~/.codex/config.toml`, and OpenCode's `opencode.json`/`opencode.jsonc` (in `~/.config/opencode/`, the project root, and the project's `.opencode/`). A `.jsonc` file with comments that mentions `context-eng` is reported as `WARN`, because `doctor` cannot read JSONC
 - prompt hooks in `~/.claude/settings.json`, `~/.codex/hooks.json`, and the current project's `.claude/` and `.codex/` hook files
 
 Each line is `ok`, `WARN` (starts through `npx`/`pnpm dlx`), or `ERROR` (points at a file that no longer exists, for example after you switch or remove a Node version). It exits with code 1 when it finds a problem. Use `--project <path>` to check another project's hook files.
@@ -77,7 +77,7 @@ Each line is `ok`, `WARN` (starts through `npx`/`pnpm dlx`), or `ERROR` (points 
 npm uninstall -g context-eng
 ```
 
-Then remove the `context-eng` entry from `~/.claude.json`, `~/.cursor/mcp.json`, and `[mcp_servers.context-eng]` in `~/.codex/config.toml`, and any hook whose command contains `context-eng` in `~/.claude/settings.json` or `~/.codex/hooks.json`. Your memories stay in `~/.context` (or `$CONTEXT_ENG_HOME`) until you delete that folder.
+Then remove the `context-eng` entry from `~/.claude.json`, `~/.cursor/mcp.json`, `[mcp_servers.context-eng]` in `~/.codex/config.toml`, and `mcp.context-eng` or `mcp.servers.context-eng` in `~/.config/opencode/opencode.json`. Also remove any hook whose command contains `context-eng` in `~/.claude/settings.json` or `~/.codex/hooks.json`, and the `recall.md`/`postsession.md` commands in `~/.config/opencode/commands/`. Your memories stay in `~/.context` (or `$CONTEXT_ENG_HOME`) until you delete that folder.
 
 To set up a different folder than the one you are in:
 
@@ -87,7 +87,7 @@ context-eng init --project /path/to/repo
 
 `init` asks for a TypeSafe API key. The prompt is hidden. Press Enter to skip. A saved key is kept if you press Enter again; type a new key to replace it. The key goes in the OS keychain (macOS Keychain, Windows Credential Manager, or libsecret), not into the project.
 
-In a terminal, `init` lists Cursor, Claude Code, and Codex. Installed ones start selected. Space turns one off. Enter writes a user-level MCP server only for the ones left selected. A different existing `context-eng` server needs an explicit yes before replacement. Without a terminal, `init` skips global instructions and editor servers unless you pass `--yes`; `--yes` adds missing servers but never replaces a different one. Restart an app after adding its server.
+In a terminal, `init` lists Cursor, Claude Code, Codex, and OpenCode. Installed ones start selected. Space turns one off. Enter writes a user-level MCP server only for the ones left selected. A different existing `context-eng` server needs an explicit yes before replacement. Without a terminal, `init` skips global instructions and editor servers unless you pass `--yes`; `--yes` adds missing servers but never replaces a different one. Restart an app after adding its server.
 
 ```mermaid
 flowchart TD
@@ -99,11 +99,13 @@ flowchart TD
   pick --> claude["~/.claude.json"]
   claude --> claudeRules["~/.claude/CLAUDE.md"]
   pick --> codex["~/.codex/config.toml"]
+  pick --> opencode["~/.config/opencode/opencode.json"]
+  opencode --> opencodeRules["~/.config/opencode/AGENTS.md (or ~/.claude/CLAUDE.md)"]
 ```
 
 
 
-You do not start the server yourself. Cursor, Claude Code, or Codex runs `context-eng mcp`. With no `--project`, the server is global until a tool passes `projectPath` or calls `memory_bind`.
+You do not start the server yourself. Cursor, Claude Code, Codex, or OpenCode runs `context-eng mcp`. With no `--project`, the server is global until a tool passes `projectPath` or calls `memory_bind`.
 
 ### Project and global
 
@@ -126,13 +128,15 @@ Instruction files (`AGENTS.md`, `CLAUDE.md`, and the rule files below) keep your
 | File                                           | When                                                        | What it does                                                                                                         |
 | ---------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | OS keychain `context-eng` / `typesafe-api-key` | Always                                                      | Stores the TypeSafe key for this login                                                                               |
-| `<project>/AGENTS.md`                          | Only if that file already exists                            | Tells Codex, in this repo, to use the memory tools                                                                   |
+| `<project>/AGENTS.md`                          | Only if that file already exists                            | Tells Codex and OpenCode, in this repo, to use the memory tools                                                      |
 | `<project>/CLAUDE.md`                          | Only if that file already exists                            | Tells Claude Code, in this repo, to use the memory tools                                                             |
 | `~/.codex/AGENTS.md`                           | Terminal or `--yes`                                         | Same instructions for every Codex session                                                                            |
 | `~/.claude/CLAUDE.md`                          | Claude server added or already matching, or `--claude-only` | Same instructions for every Claude Code project                                                                      |
 | `~/.cursor/mcp.json`                           | Cursor selected                                             | Starts the server for every Cursor project. No `--project`                                                           |
 | `~/.claude.json`                               | Claude selected                                             | Same for every Claude Code project. This is the file `claude mcp add --scope user` writes                            |
 | `~/.codex/config.toml`                         | Codex selected                                              | Adds `[mcp_servers.context-eng]` only. Codex may later add `[mcp_servers.context-eng.tools.*]` approval lines itself |
+| `~/.config/opencode/opencode.json`             | OpenCode selected                                           | Adds a `local` server. See [OpenCode](#opencode) for which config shape is written                                    |
+| `~/.config/opencode/AGENTS.md`                 | OpenCode server added or already matching, or `--opencode-only` | Same instructions for every OpenCode session. Written to `~/.claude/CLAUDE.md` instead while OpenCode falls back to it |
 
 
 `<project>` is `--project`, or the current directory when you omit it. It must already exist. Running `init` from `~` uses your home directory as `<project>`. It does not create `~/AGENTS.md` or `~/CLAUDE.md` when those files are absent. Claude's user-level MCP server is in `~/.claude.json`; `init` does not create a project `.mcp.json`.
@@ -143,6 +147,7 @@ These skip the key prompt and the MCP server write. They only update instruction
 
 ```bash
 context-eng init --codex-only
+context-eng init --opencode-only
 context-eng init --cursor-only --scope global
 context-eng init --cursor-only --project /path/to/repo
 context-eng init --claude-only --scope both --project /path/to/repo
@@ -154,6 +159,7 @@ context-eng init --claude-only --scope both --project /path/to/repo
 | `--codex-only`  | `~/.codex/AGENTS.md`                     | none                                             |
 | `--cursor-only` | `~/.cursor/rules/context-eng-memory.mdc` | `<project>/.cursor/rules/context-eng-memory.mdc` |
 | `--claude-only` | `~/.claude/CLAUDE.md`                    | `<project>/.claude/rules/context-eng-memory.md`  |
+| `--opencode-only` | `~/.config/opencode/AGENTS.md`, or `~/.claude/CLAUDE.md` while OpenCode falls back to it | none |
 
 
 `--scope` is `global`, `project`, or `both`. With no `--project`, scope defaults to `global`. With `--project` and no `--scope`, scope defaults to `project`. `project` and `both` need `--project`.
@@ -162,7 +168,7 @@ context-eng init --claude-only --scope both --project /path/to/repo
 
 ## Recall from the agent prompt box
 
-Prompt-box recall supports local Codex and Claude Code on macOS and Linux. A `UserPromptSubmit` command hook fetches memories before the model processes the prompt. It calls the existing memory engine directly, so the model does not need to choose `memory_search` or run a terminal command.
+Prompt-box recall supports local Codex and Claude Code on macOS and Linux. OpenCode gets a manual, model-driven `/recall` command instead ([OpenCode](#opencode)). A `UserPromptSubmit` command hook fetches memories before the model processes the prompt. It calls the existing memory engine directly, so the model does not need to choose `memory_search` or run a terminal command.
 
 After publishing a release that includes these integrations, install a durable copy and configure recall:
 
@@ -171,7 +177,7 @@ npm install -g context-eng@latest
 context-eng init --recall manual
 ```
 
-Setup selects detected Claude/Codex hosts. Use `--harness claude` or `--harness codex` to target one directly. This recall-only setup does not configure MCP or prompt for a key; ordinary `context-eng init` still handles MCP and the optional key. Temporary `npx`/`pnpm dlx` runtimes are rejected for hook installation because their cached files can disappear. A stable source checkout also works for development.
+Setup selects detected Claude, Codex, and OpenCode hosts. Use `--harness claude`, `--harness codex`, or `--harness opencode` to target one directly. OpenCode gets a manual command rather than a hook; see [OpenCode](#opencode). This recall-only setup does not configure MCP or prompt for a key; ordinary `context-eng init` still handles MCP and the optional key. Temporary `npx`/`pnpm dlx` runtimes are rejected for hook installation because their cached files can disappear. A stable source checkout also works for development.
 
 Restart the selected host after installation. Codex requires review and trust of the hook using `/hooks`; project-local Codex hooks also require trusting the project. Then invoke recall from the prompt box:
 
@@ -200,6 +206,34 @@ Global setup writes these files:
 | Codex | `~/.codex/hooks.json` | `~/.agents/skills/recall/SKILL.md` and `agents/openai.yaml` |
 
 Use `--scope project --project /path/to/repo` for project setup. It writes `.claude/settings.local.json` or `.codex/hooks.json` and the corresponding skill directory inside that project. Project hooks bind to that root even from nested working directories. Global hooks use the event's current directory; use project setup when a nested directory should share the repository root's memory. Disabling uses the same scope/project flags as installation. Keep one installation scope per host across your projects.
+
+### OpenCode
+
+`context-eng init` detects OpenCode (`opencode` on PATH, `~/.config/opencode`, or `~/.opencode`) and adds a `local` MCP server to `~/.config/opencode/opencode.json`. If that file is missing and `opencode.jsonc` exists, it edits `opencode.jsonc` instead. `$XDG_CONFIG_HOME/opencode` is used when `XDG_CONFIG_HOME` is set.
+
+- **Config shape.** If the file already keeps servers under `mcp.servers` (OpenCode V2), the entry goes there. Otherwise it is written as `mcp.context-eng`. OpenCode V1 reads that shape, and V2 still accepts it and migrates it. Either way the entry is `{ "type": "local", "command": [node, cli-entry.js, "mcp"] }`.
+- **JSONC files.** `init` does not edit a JSONC file with comments. It reports an error and leaves the file unchanged, so add the entry by hand.
+- **Tool names.** OpenCode names the tools `context-eng_memory_search`, `context-eng_memory_create`, and so on.
+
+OpenCode's global rules file is `~/.config/opencode/AGENTS.md`. While that file does not exist, OpenCode reads `~/.claude/CLAUDE.md` instead. Creating `AGENTS.md` would hide those instructions, so in that case `init` writes the memory pointer into `~/.claude/CLAUDE.md`. Set `OPENCODE_DISABLE_CLAUDE_CODE=1` or `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1` to turn that fallback off; `init` then creates `AGENTS.md`.
+
+OpenCode has no shell prompt hook, so recall and postsession are installed as [custom commands](https://opencode.ai/docs/commands/) instead:
+
+```sh
+context-eng init --recall manual --harness opencode
+context-eng init --postsession manual --harness opencode
+```
+
+| Scope | Files |
+| --- | --- |
+| global (default) | `~/.config/opencode/commands/recall.md` and `postsession.md` |
+| `--scope project --project <path>` | `<path>/.opencode/commands/recall.md` and `postsession.md` |
+
+- **Model-driven recall.** Restart OpenCode, then type `/recall Fix login` or `/postsession`. `/recall` asks the model to call `memory_search` once, show the results, and wait. Unlike the Claude and Codex hooks, the model runs the search itself, so the MCP server must be connected.
+- **Manual only.** There is no automatic mode: `--recall automatic --harness opencode` is an error. When OpenCode is only auto-detected next to Claude or Codex, it gets manual `/recall`. `--local` does not apply, because the MCP server handles relevance filtering.
+- **No runtime needed.** The commands contain no runtime paths, so they also work from `npx`.
+- **Ownership.** A command file that context-eng did not write is never overwritten. `--recall off` and `--postsession off` remove only context-eng's own files.
+- **Claude skills also show up.** OpenCode also loads skills from `~/.claude/skills` and `~/.agents/skills`. Recall and postsession skills installed for Claude or Codex therefore appear in OpenCode as `@recall` and `@postsession`. The commands above are the OpenCode way to use them.
 
 Cursor's documented `beforeSubmitPrompt` hook cannot add memory context, so recall setup does not install a Cursor adapter. Remote/cloud hosts need the runtime and memory data in their own execution environment; installing locally does not deploy them there. Rerun setup after moving the checkout or changing the installed Node path.
 
@@ -258,7 +292,7 @@ npx context-eng@latest init --postsession manual --harness codex --scope project
 
 This command installs the manual saving skill only; it does not configure the memory tools. It works through `npx` because the skill uses the host's current model and connected tools, with no persistent hook command pointing into the temporary package cache.
 
-Restart Codex, then type `$postsession` or select the postsession skill. In Claude Code, install with `--harness claude`, restart, and type `/postsession`. Native skill invocation uses the current conversation and model. It does not read transcripts or call another model. Ordinary prompts do not invoke it. Codex uses `policy.allow_implicit_invocation: false` in `agents/openai.yaml`; Claude uses `disable-model-invocation: true` in `SKILL.md` ([Codex documentation](https://learn.chatgpt.com/docs/build-skills), [Claude documentation](https://code.claude.com/docs/en/skills)).
+Restart Codex, then type `$postsession` or select the postsession skill. In Claude Code, install with `--harness claude`, restart, and type `/postsession`. In OpenCode, install with `--harness opencode`, restart, and type `/postsession` (see [OpenCode](#opencode)). Native skill invocation uses the current conversation and model. It does not read transcripts or call another model. Ordinary prompts do not invoke it. Codex uses `policy.allow_implicit_invocation: false` in `agents/openai.yaml`; Claude uses `disable-model-invocation: true` in `SKILL.md` ([Codex documentation](https://learn.chatgpt.com/docs/build-skills), [Claude documentation](https://code.claude.com/docs/en/skills)).
 
 Project setup writes `.agents/skills/postsession/SKILL.md` and `agents/openai.yaml` for Codex, or `.claude/skills/postsession/SKILL.md` for Claude. Project skills derive the absolute project root from that installed skill's location, including when invoked from nested directories; they contain no machine-specific root. `--scope global` installs under your home instead; the skill must resolve the current project's root before writing. Skill-only setup adds no UserPromptSubmit or Stop handler and needs no hook trust approval. Restarting also reloads any removed Stop handler; recall retains its own hook trust requirements.
 
@@ -369,7 +403,7 @@ flowchart TD
 
 Node.js 20 or newer.
 
-One command, after this package is published. It asks for the TypeSafe key, then detects Cursor, Claude Code, and Codex. In a terminal the installed ones start selected. Space turns one off, Enter confirms, and init writes a user-level MCP server only for the ones left selected. It then asks whether to install prompt-box hooks; if you choose yes, select recall mode, post-session saving, and the Claude/Codex hosts. The wizard configures global hooks; use the explicit `--scope project --project <path>` hook commands when a hook should belong to one project. A different existing `context-eng` setup needs confirmation before replacement. In a non-terminal session, or with `--yes`, the hook wizard does not run. When init runs from a global install, the server is the absolute `node` path plus the absolute `dist/cli-entry.js` path, for example `/usr/local/bin/node /usr/local/lib/node_modules/context-eng/dist/cli-entry.js mcp`. Only when init runs from a temporary `npx`/`pnpm dlx` cache (or on Windows) does it fall back to `npx -y context-eng mcp`, or `pnpm dlx context-eng mcp` without `npx`, and it prints a warning. The fallback is weaker because `npx` finds the package by name from the current folder: inside any folder whose `package.json` is also named `context-eng`, it runs that folder's code instead. An existing `npx` entry is offered for replacement when you rerun init. If you switch Node versions, rerun `context-eng init` so the paths point at the new install. Global configs omit `--project`.
+One command, after this package is published. It asks for the TypeSafe key, then detects Cursor, Claude Code, Codex, and OpenCode. In a terminal the installed ones start selected. Space turns one off, Enter confirms, and init writes a user-level MCP server only for the ones left selected. It then asks whether to install prompt-box hooks; if you choose yes, select recall mode, post-session saving, and the Claude/Codex/OpenCode hosts (OpenCode gets manual commands). The wizard configures global hooks; use the explicit `--scope project --project <path>` hook commands when a hook should belong to one project. A different existing `context-eng` setup needs confirmation before replacement. In a non-terminal session, or with `--yes`, the hook wizard does not run. When init runs from a global install, the server is the absolute `node` path plus the absolute `dist/cli-entry.js` path, for example `/usr/local/bin/node /usr/local/lib/node_modules/context-eng/dist/cli-entry.js mcp`. Only when init runs from a temporary `npx`/`pnpm dlx` cache (or on Windows) does it fall back to `npx -y context-eng mcp`, or `pnpm dlx context-eng mcp` without `npx`, and it prints a warning. The fallback is weaker because `npx` finds the package by name from the current folder: inside any folder whose `package.json` is also named `context-eng`, it runs that folder's code instead. An existing `npx` entry is offered for replacement when you rerun init. If you switch Node versions, rerun `context-eng init` so the paths point at the new install. Global configs omit `--project`.
 
 When init runs from a temporary `npx` or `pnpm dlx` cache, MCP setup completes and the hook wizard is skipped with an explanation. To choose hooks, run `npm install -g context-eng`, then `context-eng init` from that durable installation. A stable source checkout can also run the wizard.
 

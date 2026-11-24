@@ -27,6 +27,7 @@ import {
   detectHarnesses,
   formatHarnessReport,
   installDetectedHarnesses,
+  opencodeConfigDir,
   pathHasCommand,
   promptHarnessChoice,
   type DurableRuntime,
@@ -34,6 +35,7 @@ import {
 } from "./harness.js";
 import { formatDoctor, runDoctor } from "./doctor.js";
 import { runStdio } from "./mcp.js";
+import { installOpencodeCommand } from "./opencode.js";
 import { resolveProjectPath } from "./paths.js";
 import { installPostsessionHook, parsePostsessionMode, runPostsessionHook } from "./postsession.js";
 import { renderMemoryContext, retrieveMemories } from "./retrieval.js";
@@ -59,9 +61,10 @@ const USAGE = `Usage:
   context-eng doctor [--project <path>]
   context-eng recall --query <text> [--project <path>] [--scope global|project|both] [--limit <1-50>] [--local]
   context-eng init [--project <path>] [--yes]
-  context-eng init --recall manual|automatic|off [--harness claude|codex] [--scope global|project] [--project <path>] [--local] [--yes]
-  context-eng init --postsession manual|off [--harness claude|codex] [--scope global|project] [--project <path>] [--yes]
+  context-eng init --recall manual|automatic|off [--harness claude|codex|opencode] [--scope global|project] [--project <path>] [--local] [--yes]
+  context-eng init --postsession manual|off [--harness claude|codex|opencode] [--scope global|project] [--project <path>] [--yes]
   context-eng init --codex-only
+  context-eng init --opencode-only
   context-eng init --cursor-only [--scope global|project|both] [--project <path>]
   context-eng init --claude-only [--scope global|project|both] [--project <path>]
   context-eng hook --harness claude|codex --mode manual|automatic [--project <path>] [--local]
@@ -84,6 +87,7 @@ interface CliOptions {
   "codex-only"?: boolean;
   "cursor-only"?: boolean;
   "claude-only"?: boolean;
+  "opencode-only"?: boolean;
 }
 
 export function upsertMarkedBlock(existing: string | null, block: string): string {
@@ -156,6 +160,40 @@ export function writeCodexAgentsPointer(block: string, home = os.homedir()): str
   mkdirSync(path.dirname(file), { recursive: true });
   writePointer(file, block);
   return file;
+}
+
+export function opencodeAgentsPath(home = os.homedir(), env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(opencodeConfigDir(home, env), "AGENTS.md");
+}
+
+function envFlagSet(value: string | undefined): boolean {
+  return value !== undefined && value !== "" && value !== "0" && value.toLowerCase() !== "false";
+}
+
+/**
+ * OpenCode's global rules file. Without ~/.config/opencode/AGENTS.md, OpenCode
+ * reads ~/.claude/CLAUDE.md instead, so creating AGENTS.md would hide those
+ * instructions. Write into whichever file OpenCode actually loads.
+ */
+export function writeOpencodeAgentsPointer(
+  block: string, home = os.homedir(), env: NodeJS.ProcessEnv = process.env,
+): { file: string; agentsFile: string; claudeFallback: boolean } {
+  const agents = opencodeAgentsPath(home, env);
+  const claude = globalClaudeAgentsPath(home);
+  const fallbackDisabled = envFlagSet(env.OPENCODE_DISABLE_CLAUDE_CODE) || envFlagSet(env.OPENCODE_DISABLE_CLAUDE_CODE_PROMPT);
+  if (!existsSync(agents) && existsSync(claude) && !fallbackDisabled) {
+    writePointer(claude, block);
+    return { file: claude, agentsFile: agents, claudeFallback: true };
+  }
+  mkdirSync(path.dirname(agents), { recursive: true });
+  writePointer(agents, block);
+  return { file: agents, agentsFile: agents, claudeFallback: false };
+}
+
+function formatOpencodePointer(written: { file: string; agentsFile: string; claudeFallback: boolean }): string {
+  return written.claudeFallback
+    ? `${written.file} (OpenCode reads it while ${written.agentsFile} is absent)`
+    : written.file;
 }
 
 export function globalCursorRulePath(home = os.homedir()): string {
@@ -340,42 +378,81 @@ export async function promptHookSetup(
       else if (answer === "o" || answer === "off") recall = "off";
       else log("Choose manual, automatic, or off.");
     }
-    const postsession = await ask("Install manual postsession saving ($postsession in Codex, /postsession in Claude)? [y/N] ");
+    const postsession = await ask("Install manual postsession saving ($postsession in Codex, /postsession in Claude or OpenCode)? [y/N]");
     return { recall, postsession: /^y(?:es)?$/i.test(postsession.trim()) };
   } finally {
     prompt?.close();
   }
 }
 
+/** Hosts that `init --recall` / `init --postsession` can set up: hook hosts plus OpenCode commands. */
+type SetupHarness = RecallHarness | "opencode";
+const SETUP_HARNESSES: readonly SetupHarness[] = [...RECALL_HARNESSES, "opencode"];
+
+function isSetupHarness(id: string): id is SetupHarness {
+  return (SETUP_HARNESSES as readonly string[]).includes(id);
+}
+
+function parseSetupHarness(value: string): SetupHarness {
+  if (!isSetupHarness(value)) throw new Error("hook setup supports --harness claude, codex, or opencode");
+  return value;
+}
+
 async function configureMemoryHooks(
-  values: CliOptions, setup: HookSetup, selectedHarnesses?: readonly RecallHarness[],
+  values: CliOptions, setup: HookSetup, selectedHarnesses?: readonly SetupHarness[],
 ): Promise<void> {
   if (values.query !== undefined || values.limit !== undefined) throw new Error("hook setup does not accept --query or --limit");
   if (setup.kind === "postsession" && values.local !== undefined) throw new Error("postsession uses the harness model; --local only applies to recall");
-  if (values["cursor-only"]) throw new Error("This integration supports Claude Code and Codex; select one with --harness");
+  if (values["cursor-only"]) throw new Error("This integration supports Claude Code, Codex, and OpenCode; select one with --harness");
   const scope = values.scope ?? "global";
   if (scope !== "global" && scope !== "project") throw new Error("hook setup scope must be global or project");
   if (scope === "project" && values.project === undefined) throw new Error("project hook setup requires --project <path>");
   const projectPath = resolveProjectPath(values.project);
   if (!existsSync(projectPath) || !statSync(projectPath).isDirectory()) throw new Error("hook setup requires an existing project directory");
   const disabled = setup.kind === "recall" ? setup.mode === "off" : !setup.enabled;
-  const only = [values["claude-only"] ? "claude" : undefined, values["codex-only"] ? "codex" : undefined]
-    .filter((id): id is "claude" | "codex" => id !== undefined);
+  const only = [
+    values["claude-only"] ? "claude" : undefined,
+    values["codex-only"] ? "codex" : undefined,
+    values["opencode-only"] ? "opencode" : undefined,
+  ].filter((id): id is SetupHarness => id !== undefined);
   if (values.harness && only.length) throw new Error("use --harness or the --*-only flags, not both");
   const home = os.homedir();
-  let selected: readonly HarnessId[];
+  let selected: readonly SetupHarness[];
+  let explicit = false;
   if (selectedHarnesses !== undefined) selected = selectedHarnesses;
-  else if (values.harness !== undefined) selected = [parseRecallHarness(values.harness)];
-  else if (only.length) selected = only;
-  else if (disabled) selected = RECALL_HARNESSES;
+  else if (values.harness !== undefined) {
+    selected = [parseSetupHarness(values.harness)];
+    explicit = true;
+  } else if (only.length) {
+    selected = only;
+    explicit = true;
+  } else if (disabled) selected = SETUP_HARNESSES;
   else {
     const installed = detectHarnesses({ home, hasCommand: pathHasCommand })
-      .filter((hit) => hit.installed && hit.id !== "cursor")
-      .map((hit) => hit.id);
-    selected = process.stdin.isTTY === true && values.yes !== true ? await promptHarnessChoice(installed) : installed;
+      .filter((hit) => hit.installed)
+      .map((hit) => hit.id)
+      .filter(isSetupHarness);
+    selected = process.stdin.isTTY === true && values.yes !== true
+      ? (await promptHarnessChoice(installed)).filter(isSetupHarness)
+      : installed;
   }
-  if (!selected.length) throw new Error("No hook host selected. Use --harness claude or --harness codex.");
+  if (!selected.length) throw new Error("No hook host selected. Use --harness claude, codex, or opencode.");
+  const automatic = setup.kind === "recall" && setup.mode === "automatic";
+  if (automatic && explicit && selected.includes("opencode")) {
+    throw new Error("OpenCode has no prompt hook, so its recall is manual only. Use --recall manual for --harness opencode.");
+  }
   for (const id of selected) {
+    if (id === "opencode") {
+      const enabled = !disabled;
+      const files = installOpencodeCommand({ name: setup.kind, enabled, scope, home, projectPath });
+      const note = automatic ? " (OpenCode has no prompt hook; installed manual /recall instead)" : "";
+      console.log(`opencode ${setup.kind}: ${enabled ? "manual" : "off"}${files.length ? "" : " (unchanged)"}${note}`);
+      for (const file of files) console.log(`  ${file}`);
+      if (setup.kind === "recall" && enabled && values.local !== undefined) {
+        console.log("  --local does not apply to OpenCode; its /recall uses the context-eng MCP server.");
+      }
+      continue;
+    }
     const common: Pick<RecallInstallOptions, "harness" | "scope" | "home" | "projectPath"> = {
       harness: parseRecallHarness(id), scope, home, projectPath,
     };
@@ -389,10 +466,10 @@ async function configureMemoryHooks(
   if (!disabled) {
     console.log(setup.kind === "recall"
       ? "Restart the selected host. In Codex, review and trust the hook using /hooks."
-      : "Restart the selected host to load the postsession skill and reload any removed Stop hook.");
+      : "Restart the selected host to load the postsession skill or command and reload any removed Stop hook.");
     console.log(setup.kind === "recall"
-      ? "Manual recall: /recall <topic> in Claude, or $recall <topic> in Codex."
-      : "Manual saving: $postsession in Codex or /postsession in Claude. Requires connected, permitted memory tools; Saved is reported only after confirmed creation/promotion.");
+      ? "Manual recall: /recall <topic> in Claude or OpenCode, or $recall <topic> in Codex."
+      : "Manual saving: $postsession in Codex or /postsession in Claude or OpenCode. Requires connected, permitted memory tools; Saved is reported only after confirmed creation/promotion.");
   }
 }
 
@@ -401,9 +478,10 @@ async function configureInteractiveHooks(values: CliOptions): Promise<void> {
   const setup = await promptHookSetup();
   if (!setup) return;
   const hosts = detectHarnesses({ home: os.homedir(), hasCommand: pathHasCommand })
-    .filter((hit) => hit.installed && hit.id !== "cursor")
-    .map((hit) => parseRecallHarness(hit.id));
-  const selected = (await promptHarnessChoice(hosts)).map((id) => parseRecallHarness(id));
+    .filter((hit) => hit.installed)
+    .map((hit) => hit.id)
+    .filter(isSetupHarness);
+  const selected = (await promptHarnessChoice(hosts)).filter(isSetupHarness);
   if (!selected.length) {
     console.log("No prompt-box hook host selected; skipped hook setup.");
     return;
@@ -435,6 +513,7 @@ export async function main(): Promise<void> {
         "codex-only": { type: "boolean" },
         "cursor-only": { type: "boolean" },
         "claude-only": { type: "boolean" },
+        "opencode-only": { type: "boolean" },
       },
       allowPositionals: true,
       strict: true,
@@ -457,7 +536,10 @@ export async function main(): Promise<void> {
   }
 
   if (command === "doctor") {
-    const findings = runDoctor({ home: os.homedir(), projectPath: resolveProjectPath(values.project) });
+    const home = os.homedir();
+    const findings = runDoctor({
+      home, projectPath: resolveProjectPath(values.project), opencodeDir: opencodeConfigDir(home),
+    });
     console.log(formatDoctor(findings));
     process.exitCode = findings.some((item) => item.level !== "ok") ? 1 : 0;
     return;
@@ -466,7 +548,7 @@ export async function main(): Promise<void> {
   if (command === "postsession") {
     if (values.scope !== undefined || values.query !== undefined || values.limit !== undefined || values.local !== undefined ||
       values.mode !== undefined || values.recall !== undefined || values.postsession !== undefined || values["context-eng-recall"] !== undefined ||
-      values.yes || values["codex-only"] || values["claude-only"] || values["cursor-only"]) {
+      values.yes || values["codex-only"] || values["claude-only"] || values["cursor-only"] || values["opencode-only"]) {
       throw new Error("postsession only accepts --harness and --project");
     }
     if (!values.harness) throw new Error("postsession requires --harness claude or codex");
@@ -478,7 +560,7 @@ export async function main(): Promise<void> {
 
   if (command === "hook") {
     if (values.scope !== undefined || values.query !== undefined || values.limit !== undefined || values.recall !== undefined || values.postsession !== undefined ||
-      values.yes || values["codex-only"] || values["claude-only"] || values["cursor-only"]) {
+      values.yes || values["codex-only"] || values["claude-only"] || values["cursor-only"] || values["opencode-only"]) {
       throw new Error("hook only accepts --harness, --mode, --project, and --local");
     }
     if (!values.harness) throw new Error("hook requires --harness claude or codex");
@@ -509,7 +591,7 @@ export async function main(): Promise<void> {
   }
 
   if (command === "recall") {
-    if (values.yes || values["codex-only"] || values["cursor-only"] || values["claude-only"]) {
+    if (values.yes || values["codex-only"] || values["cursor-only"] || values["claude-only"] || values["opencode-only"]) {
       throw new Error("recall does not accept init options");
     }
     if (!values.query?.trim()) throw new Error("recall requires --query <text>");
@@ -553,10 +635,13 @@ export async function main(): Promise<void> {
     return;
   }
 
-  if (values["codex-only"] || values["cursor-only"] || values["claude-only"]) {
+  if (values["codex-only"] || values["cursor-only"] || values["claude-only"] || values["opencode-only"]) {
     const block = agentPointerBlock();
     if (values["codex-only"]) {
       console.log(`Updated ${writeCodexAgentsPointer(block)}`);
+    }
+    if (values["opencode-only"]) {
+      console.log(`Updated ${formatOpencodePointer(writeOpencodeAgentsPointer(block))}`);
     }
     const scopedOpts = values.project === undefined
       ? undefined
@@ -630,6 +715,10 @@ export async function main(): Promise<void> {
     const claude = report.harnesses.find((item) => item.id === "claude");
     if (canWriteGlobal && claude?.installed && !claude.skipped && !claude.error && !claude.preserved) {
       console.log(`  global Claude instructions: ${writeGlobalClaudePointer(block, home)}`);
+    }
+    const opencode = report.harnesses.find((item) => item.id === "opencode");
+    if (canWriteGlobal && opencode?.installed && !opencode.skipped && !opencode.error && !opencode.preserved) {
+      console.log(`  global OpenCode instructions: ${formatOpencodePointer(writeOpencodeAgentsPointer(block, home))}`);
     }
     console.log(formatHarnessReport(report));
     await configureInteractiveHooks(values);

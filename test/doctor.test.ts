@@ -114,6 +114,29 @@ describe("doctor", () => {
     expect(formatDoctor(findings)).toContain("2 problem(s) found.");
   });
 
+  it("reads OpenCode servers in both config shapes and does not misreport JSONC", () => {
+    const home = tempDir();
+    const project = tempDir();
+    const dir = path.join(home, ".config", "opencode");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "opencode.json"), JSON.stringify({ mcp: { servers: {
+      "context-eng": { type: "local", command: ["/good/node", "/good/cli-entry.js", "mcp"] },
+    } } }));
+    writeFileSync(path.join(dir, "opencode.jsonc"), '{\n  // comment\n  "mcp": { "context-eng": {} }\n}\n');
+    writeFileSync(path.join(project, "opencode.json"), JSON.stringify({ mcp: {
+      "context-eng": { type: "local", command: ["npx", "-y", "context-eng", "mcp"], enabled: true },
+    } }));
+    mkdirSync(path.join(project, ".opencode"));
+    writeFileSync(path.join(project, ".opencode", "opencode.jsonc"), "{\n  // no server here\n}\n");
+
+    const findings = runDoctor({ home, projectPath: project, exists, opencodeDir: dir });
+    expect(findings.map((item) => [item.file.replace(home, "~").replace(project, "<project>"), item.level])).toEqual([
+      ["~/.config/opencode/opencode.json", "ok"],
+      ["~/.config/opencode/opencode.jsonc", "warn"],
+      ["<project>/opencode.json", "warn"],
+    ]);
+  });
+
   it("says so when nothing is configured", () => {
     expect(formatDoctor(runDoctor({ home: tempDir(), projectPath: tempDir() }))).toContain("no context-eng launches found");
   });

@@ -115,6 +115,34 @@ function codexServer(file: string, exists: Exists): DoctorFinding[] {
   return [checkLaunch(file, "MCP server", [command, ...args], exists)];
 }
 
+function opencodeServer(file: string, exists: Exists): DoctorFinding[] {
+  const text = readOptional(file);
+  if (text === null) return [];
+  let root: unknown;
+  try {
+    root = JSON.parse(text);
+  } catch {
+    // JSONC (comments, trailing commas) is valid for OpenCode but not for JSON.parse.
+    if (!file.endsWith(".jsonc")) return [{ level: "error", file, what: "MCP server", message: "config is not valid JSON" }];
+    return text.includes("context-eng")
+      ? [{ level: "warn", file, what: "MCP server", message: "JSONC with comments could not be read; check the context-eng entry by hand" }]
+      : [];
+  }
+  const mcp = (root as { mcp?: unknown } | null)?.mcp;
+  if (mcp === null || typeof mcp !== "object") return [];
+  const servers = (mcp as { servers?: unknown }).servers;
+  const fromServers = servers !== null && typeof servers === "object"
+    ? (servers as Record<string, unknown>)["context-eng"]
+    : undefined;
+  const server = fromServers ?? (mcp as Record<string, unknown>)["context-eng"];
+  if (server === undefined || server === null || typeof server !== "object") return [];
+  const { command } = server as { command?: unknown };
+  if (!Array.isArray(command) || command.length === 0) {
+    return [{ level: "error", file, what: "MCP server", message: "command must be a non-empty array" }];
+  }
+  return [checkLaunch(file, "MCP server", command.map(String), exists)];
+}
+
 function hookCommands(value: unknown, found: string[]): string[] {
   if (Array.isArray(value)) {
     for (const item of value) hookCommands(item, found);
@@ -139,14 +167,20 @@ function hookFile(file: string, exists: Exists): DoctorFinding[] {
   return hookCommands(parsed, []).map((command) => checkLaunch(file, "hook", shellWords(command), exists));
 }
 
-export function runDoctor(input: { home: string; projectPath: string; exists?: Exists }): DoctorFinding[] {
+export function runDoctor(input: {
+  home: string; projectPath: string; exists?: Exists; opencodeDir?: string;
+}): DoctorFinding[] {
   const exists = input.exists ?? existsSync;
   const { home, projectPath } = input;
+  const opencodeDir = input.opencodeDir ?? path.join(home, ".config", "opencode");
+  const opencodeFiles = [...new Set([opencodeDir, projectPath, path.join(projectPath, ".opencode")]
+    .flatMap((dir) => ["opencode.json", "opencode.jsonc"].map((name) => path.join(dir, name))))];
   return [
     ...jsonServer(path.join(home, ".claude.json"), exists),
     ...jsonServer(path.join(home, ".cursor", "mcp.json"), exists),
     ...jsonServer(path.join(projectPath, ".cursor", "mcp.json"), exists),
     ...codexServer(path.join(home, ".codex", "config.toml"), exists),
+    ...opencodeFiles.flatMap((file) => opencodeServer(file, exists)),
     ...hookFile(path.join(home, ".claude", "settings.json"), exists),
     ...hookFile(path.join(projectPath, ".claude", "settings.json"), exists),
     ...hookFile(path.join(projectPath, ".claude", "settings.local.json"), exists),

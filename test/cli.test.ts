@@ -30,6 +30,7 @@ import {
   cursorRulePath,
   globalClaudeAgentsPath,
   globalCursorRulePath,
+  opencodeAgentsPath,
   promptHookSetup,
   resolveCursorRuleScope,
   upsertMarkedBlock,
@@ -40,6 +41,7 @@ import {
   writeCursorRule,
   writeCursorRules,
   writeGlobalClaudePointer,
+  writeOpencodeAgentsPointer,
 } from "../src/cli.js";
 import { resolveProjectPath } from "../src/paths.js";
 
@@ -137,6 +139,67 @@ describe("codexAgentsPath", () => {
   it("points at ~/.codex/AGENTS.md", () => {
     expect(codexAgentsPath("/tmp/home")).toBe(path.join("/tmp/home", ".codex", "AGENTS.md"));
     expect(codexAgentsPath()).toBe(path.join(os.homedir(), ".codex", "AGENTS.md"));
+  });
+});
+
+describe("writeOpencodeAgentsPointer", () => {
+  const block = () => agentPointerBlock();
+  const markers = (text: string) => text.split("<!-- context-eng:start -->").length - 1;
+
+  function home(): { home: string; agents: string; claude: string; done: () => void } {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "context-eng-home-"));
+    return {
+      home: dir,
+      agents: path.join(dir, ".config", "opencode", "AGENTS.md"),
+      claude: path.join(dir, ".claude", "CLAUDE.md"),
+      done: () => rmSync(dir, { recursive: true, force: true }),
+    };
+  }
+
+  it("points at AGENTS.md in the OpenCode config dir", () => {
+    expect(opencodeAgentsPath("/tmp/home", {})).toBe(path.join("/tmp/home", ".config", "opencode", "AGENTS.md"));
+    expect(opencodeAgentsPath("/tmp/home", { XDG_CONFIG_HOME: "/xdg" })).toBe(path.join("/xdg", "opencode", "AGENTS.md"));
+  });
+
+  it("upserts into an existing OpenCode AGENTS.md and keeps its content", () => {
+    const h = home();
+    mkdirSync(path.dirname(h.agents), { recursive: true });
+    writeFileSync(h.agents, "# Mine\n", "utf8");
+    mkdirSync(path.dirname(h.claude), { recursive: true });
+    writeFileSync(h.claude, "# Claude\n", "utf8");
+    expect(writeOpencodeAgentsPointer(block(), h.home, {})).toMatchObject({ file: h.agents, claudeFallback: false });
+    const text = readFileSync(h.agents, "utf8");
+    expect(text).toContain("# Mine");
+    expect(markers(text)).toBe(1);
+    expect(readFileSync(h.claude, "utf8")).toBe("# Claude\n");
+    h.done();
+  });
+
+  it("writes into ~/.claude/CLAUDE.md instead of hiding it when OpenCode falls back to it", () => {
+    const h = home();
+    mkdirSync(path.dirname(h.claude), { recursive: true });
+    writeFileSync(h.claude, "# Claude\n", "utf8");
+    expect(writeOpencodeAgentsPointer(block(), h.home, {})).toMatchObject({ file: h.claude, claudeFallback: true });
+    expect(existsSync(h.agents)).toBe(false);
+    expect(markers(readFileSync(h.claude, "utf8"))).toBe(1);
+    writeOpencodeAgentsPointer(block(), h.home, {});
+    expect(markers(readFileSync(h.claude, "utf8"))).toBe(1);
+    h.done();
+  });
+
+  it("creates AGENTS.md when the CLAUDE.md fallback is disabled or missing", () => {
+    for (const env of [{ OPENCODE_DISABLE_CLAUDE_CODE: "1" }, { OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: "true" }]) {
+      const h = home();
+      mkdirSync(path.dirname(h.claude), { recursive: true });
+      writeFileSync(h.claude, "# Claude\n", "utf8");
+      expect(writeOpencodeAgentsPointer(block(), h.home, env)).toMatchObject({ file: h.agents, claudeFallback: false });
+      expect(readFileSync(h.claude, "utf8")).toBe("# Claude\n");
+      h.done();
+    }
+    const h = home();
+    expect(writeOpencodeAgentsPointer(block(), h.home, {})).toMatchObject({ file: h.agents, claudeFallback: false });
+    expect(markers(readFileSync(h.agents, "utf8"))).toBe(1);
+    h.done();
   });
 });
 
