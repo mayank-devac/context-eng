@@ -16,6 +16,18 @@ die()  { printf '\n\033[1;31mError: %s\033[0m\n' "$*" >&2; exit 1; }
 
 update_device() {
   local version="$1"
+  if [[ "$version" != "latest" ]]; then
+    # A fresh publish can take a few minutes before npm will serve it.
+    say "Waiting for npm to make context-eng@$version available"
+    local tries=0
+    until npm view "context-eng@$version" version --prefer-online --registry "$REGISTRY" >/dev/null 2>&1; do
+      tries=$((tries + 1))
+      (( tries > 40 )) && die "context-eng@$version is still not available after 10 minutes. Run later: npm run update-device"
+      printf '.'
+      sleep 15
+    done
+    printf '\n'
+  fi
   say "Installing context-eng@$version globally on this device"
   npm install -g "context-eng@$version" --prefer-online --registry "$REGISTRY"
 
