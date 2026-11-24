@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { installOpencodeCommand, opencodeCommandsDir } from "../src/opencode.js";
+import { fillTemplate, installOpencodeCommand, opencodeCommandsDir } from "../src/opencode.js";
 import { resolveProjectPath } from "../src/paths.js";
 
 const dirs: string[] = [];
@@ -23,6 +23,13 @@ describe("opencodeCommandsDir", () => {
       .toBe(path.join(home, ".config", "opencode", "commands"));
     expect(opencodeCommandsDir({ scope: "project", home, projectPath: project, env: {} }))
       .toBe(path.join(resolveProjectPath(project), ".opencode", "commands"));
+  });
+});
+
+describe("fillTemplate", () => {
+  it("inserts values literally, even ones containing $ replacement patterns", () => {
+    expect(fillTemplate("A {{x}} B {{y}} {{missing}}", { x: "cost $& and $$5 $' $`", y: "ok" }))
+      .toBe("A cost $& and $$5 $' $` B ok {{missing}}");
   });
 });
 

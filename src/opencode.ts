@@ -37,14 +37,20 @@ export function opencodeCommandsDir(
     : path.join(resolveProjectPath(options.projectPath), ".opencode", "commands");
 }
 
+/** Fills `{{key}}` placeholders literally; a replacer function keeps `$&`, `$$` and friends in values intact. */
+export function fillTemplate(text: string, values: Record<string, string>): string {
+  return text.replace(/\{\{(\w+)\}\}/g, (match, key: string) => values[key] ?? match);
+}
+
 function template(name: OpencodeCommandName): string {
   if (name === "recall") {
     return readFileSync(new URL("../system_prompts/recall/opencode/recall.md", import.meta.url), "utf8");
   }
   const instructions = readFileSync(new URL("../system_prompts/postsession.md", import.meta.url), "utf8").trim();
-  return readFileSync(new URL("../system_prompts/postsession/opencode/postsession.md", import.meta.url), "utf8")
-    .replace("{{instructions}}", instructions)
-    .replace("{{project_binding}}", PROJECT_BINDING);
+  return fillTemplate(
+    readFileSync(new URL("../system_prompts/postsession/opencode/postsession.md", import.meta.url), "utf8"),
+    { instructions, project_binding: PROJECT_BINDING },
+  );
 }
 
 /** Installs (or with enabled false, removes) one owned OpenCode command file. Returns the files changed. */
