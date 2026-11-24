@@ -378,7 +378,7 @@ export async function promptHookSetup(
       else if (answer === "o" || answer === "off") recall = "off";
       else log("Choose manual, automatic, or off.");
     }
-    const postsession = await ask("Install manual postsession saving ($postsession in Codex, /postsession in Claude or OpenCode)? [y/N]");
+    const postsession = await ask("Install manual postsession saving ($postsession in Codex, /postsession in Claude or OpenCode)? [y/N] ");
     return { recall, postsession: /^y(?:es)?$/i.test(postsession.trim()) };
   } finally {
     prompt?.close();
