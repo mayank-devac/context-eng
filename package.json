@@ -1,6 +1,6 @@
 {
   "name": "context-eng",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "Local Project Memory Router for Codex, Claude Code, Cursor, and OpenCode: SQLite + FTS5 behind MCP tools.",
   "keywords": [
     "mcp",
