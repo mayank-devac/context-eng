@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { existingOpencodeServer, PACKAGE_NAME } from "./harness.js";
+import { plainObject } from "./json-config.js";
 
 // `context-eng doctor`: read-only check of every place that launches
 // context-eng (MCP servers and prompt hooks). It reports two problems:
@@ -118,25 +120,18 @@ function codexServer(file: string, exists: Exists): DoctorFinding[] {
 function opencodeServer(file: string, exists: Exists): DoctorFinding[] {
   const text = readOptional(file);
   if (text === null) return [];
-  let root: unknown;
+  let current: { found: boolean; value?: unknown };
   try {
-    root = JSON.parse(text);
-  } catch {
-    // JSONC (comments, trailing commas) is valid for OpenCode but not for JSON.parse.
-    if (!file.endsWith(".jsonc")) return [{ level: "error", file, what: "MCP server", message: "config is not valid JSON" }];
-    return text.includes("context-eng")
-      ? [{ level: "warn", file, what: "MCP server", message: "JSONC with comments could not be read; check the context-eng entry by hand" }]
-      : [];
+    // The same lookup init uses: JSONC-tolerant, V2 `mcp.servers` first, then the legacy entry.
+    current = existingOpencodeServer(text);
+  } catch (error) {
+    // A broken config that never mentions context-eng is OpenCode's problem, not a context-eng launch.
+    if (!text.includes(PACKAGE_NAME)) return [];
+    const message = error instanceof Error ? error.message : String(error);
+    return [{ level: "error", file, what: "MCP server", message }];
   }
-  const mcp = (root as { mcp?: unknown } | null)?.mcp;
-  if (mcp === null || typeof mcp !== "object") return [];
-  const servers = (mcp as { servers?: unknown }).servers;
-  const fromServers = servers !== null && typeof servers === "object"
-    ? (servers as Record<string, unknown>)["context-eng"]
-    : undefined;
-  const server = fromServers ?? (mcp as Record<string, unknown>)["context-eng"];
-  if (server === undefined || server === null || typeof server !== "object") return [];
-  const { command } = server as { command?: unknown };
+  if (!current.found || !plainObject(current.value)) return [];
+  const { command } = current.value;
   if (!Array.isArray(command) || command.length === 0) {
     return [{ level: "error", file, what: "MCP server", message: "command must be a non-empty array" }];
   }
