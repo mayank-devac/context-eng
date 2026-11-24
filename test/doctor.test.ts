@@ -137,7 +137,7 @@ describe("doctor", () => {
     ]);
   });
 
-  it("ignores broken or commented OpenCode configs that do not mention context-eng", () => {
+  it("ignores configs without context-eng and accepts a remote context-eng server", () => {
     const home = tempDir();
     const project = tempDir();
     const dir = path.join(home, ".config", "opencode");
@@ -145,6 +145,11 @@ describe("doctor", () => {
     writeFileSync(path.join(dir, "opencode.json"), '{\n  // theme only\n  "theme": "x",\n}\n');
     writeFileSync(path.join(project, "opencode.json"), "{");
     expect(runDoctor({ home, projectPath: project, exists, opencodeDir: dir })).toEqual([]);
+
+    writeFileSync(path.join(project, "opencode.json"), JSON.stringify({
+      mcp: { "context-eng": { type: "remote", url: "http://localhost:4000/mcp" } },
+    }));
+    expect(runDoctor({ home, projectPath: project, exists, opencodeDir: dir }).map((item) => item.level)).toEqual(["ok"]);
 
     writeFileSync(path.join(project, "opencode.json"), '{ "mcp": { "context-eng": ');
     expect(runDoctor({ home, projectPath: project, exists, opencodeDir: dir }).map((item) => item.level)).toEqual(["error"]);

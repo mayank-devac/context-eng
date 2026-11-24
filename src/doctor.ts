@@ -131,6 +131,10 @@ function opencodeServer(file: string, exists: Exists): DoctorFinding[] {
     return [{ level: "error", file, what: "MCP server", message }];
   }
   if (!current.found || !plainObject(current.value)) return [];
+  // A remote server is reached over its URL; there is no local command to check.
+  if (current.value.type === "remote") {
+    return [{ level: "ok", file, what: "MCP server", message: "remote server; no local launch to check" }];
+  }
   const { command } = current.value;
   if (!Array.isArray(command) || command.length === 0) {
     return [{ level: "error", file, what: "MCP server", message: "command must be a non-empty array" }];
