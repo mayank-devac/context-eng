@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 describe("bin safety", () => {
   const root = path.resolve(import.meta.dirname, "..");
   const source = (dist: string): string =>
-    path.join(root, dist.replace(/^\.\/dist\//, "src/").replace(/\.js$/, ".ts"));
+    path.join(root, dist.replace(/^(?:\.\/)?dist\//, "src/").replace(/\.js$/, ".ts"));
 
   it("starts every possible command file with a node shebang", () => {
     for (const file of ["src/cli-entry.ts", "src/cli.ts"]) {

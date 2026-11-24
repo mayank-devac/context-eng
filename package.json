@@ -10,7 +10,7 @@
     "url": "git+https://github.com/mayank-devac/context-eng.git"
   },
   "bin": {
-    "context-eng": "./dist/cli-entry.js"
+    "context-eng": "dist/cli-entry.js"
   },
   "files": [
     "dist",
