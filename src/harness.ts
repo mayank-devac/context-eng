@@ -49,7 +49,22 @@ export interface HarnessReport {
   harnesses: HarnessWrite[];
 }
 
-export function mcpLaunch(hasCommand: (name: string) => boolean): McpLaunch {
+/** An installed node binary plus the installed cli-entry.js file. */
+export interface DurableRuntime {
+  nodePath: string;
+  entryPath: string;
+}
+
+export const NPX_FALLBACK_WARNING =
+  "warning: using npx to start context-eng; install it globally (npm i -g context-eng) and rerun init for a stable launch.";
+
+// Prefer fixed absolute paths. npx finds the package by name starting from the
+// current folder, so inside a folder whose package.json is also named
+// "context-eng" it runs that folder's code instead of the installed package.
+export function mcpLaunch(hasCommand: (name: string) => boolean, durable?: DurableRuntime): McpLaunch {
+  if (durable !== undefined) {
+    return { command: durable.nodePath, args: [durable.entryPath, "mcp"] };
+  }
   if (hasCommand("pnpm") && !hasCommand("npx")) {
     return { command: "pnpm", args: ["dlx", PACKAGE_NAME, "mcp"] };
   }
@@ -252,8 +267,9 @@ export async function installDetectedHarnesses(input: {
   exists?: (file: string) => boolean;
   selected?: readonly HarnessId[];
   confirmReplace?: (id: HarnessId, file: string) => Promise<boolean> | boolean;
+  durable?: DurableRuntime;
 }): Promise<HarnessReport> {
-  const launch = mcpLaunch(input.hasCommand);
+  const launch = mcpLaunch(input.hasCommand, input.durable);
   const exists = input.exists ?? existsSync;
   const allowed = input.selected === undefined ? null : new Set(input.selected);
   const harnesses: HarnessWrite[] = [];
@@ -303,6 +319,7 @@ export function formatHarnessReport(report: HarnessReport): string {
     lines.push(`  ${item.id}: installed (${item.via}) -> ${item.file}`);
   }
   lines.push(`  server: ${report.launch.command} ${report.launch.args.join(" ")}`);
+  if (report.launch.command === "npx" || report.launch.command === "pnpm") lines.push(NPX_FALLBACK_WARNING);
   return lines.join("\n");
 }
 

@@ -2,6 +2,27 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+
+// A command file without "#!" is read by sh as a shell script. Our usage text
+// has lines like "context-eng mcp ...", so sh would start copies of itself.
+describe("bin safety", () => {
+  const root = path.resolve(import.meta.dirname, "..");
+  const source = (dist: string): string =>
+    path.join(root, dist.replace(/^\.\/dist\//, "src/").replace(/\.js$/, ".ts"));
+
+  it("starts every possible command file with a node shebang", () => {
+    for (const file of ["src/cli-entry.ts", "src/cli.ts"]) {
+      expect(readFileSync(path.join(root, file), "utf8").split("\n")[0]).toBe("#!/usr/bin/env node");
+    }
+  });
+
+  it("points every package.json bin at a source file with a shebang", () => {
+    const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as { bin: Record<string, string> };
+    for (const target of Object.values(pkg.bin)) {
+      expect(readFileSync(source(target), "utf8").startsWith("#!")).toBe(true);
+    }
+  });
+});
 import {
   agentPointerBlock,
   claudeRulePath,

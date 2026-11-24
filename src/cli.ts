@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -27,6 +28,7 @@ import {
   installDetectedHarnesses,
   pathHasCommand,
   promptHarnessChoice,
+  type DurableRuntime,
   type HarnessId,
 } from "./harness.js";
 import { runStdio } from "./mcp.js";
@@ -266,6 +268,20 @@ export function writeClaudeRules(
     files.push(writeClaudeRuleFile(block, claudeRulePath(resolveProjectPath(opts.project))));
   }
   return files;
+}
+
+// The installed node + cli-entry.js, if this run is a stable install.
+// Returns undefined for a temporary npx/dlx cache or a tsx dev run, so init
+// falls back to npx and prints a warning.
+function durableMcpRuntime(): DurableRuntime | undefined {
+  try {
+    const runtime = currentHookRuntime();
+    validateHookRuntime(runtime);
+    if (runtime.loader !== undefined) return undefined;
+    return { nodePath: runtime.nodePath, entryPath: runtime.entryPath };
+  } catch {
+    return undefined;
+  }
 }
 
 async function confirmHarnessReplacement(id: HarnessId, file: string): Promise<boolean> {
@@ -590,10 +606,12 @@ export async function main(): Promise<void> {
       : process.stdin.isTTY === true
         ? await promptHarnessChoice(installed)
         : [];
+    const durable = durableMcpRuntime();
     const report = await installDetectedHarnesses({
       home,
       hasCommand: pathHasCommand,
       selected,
+      ...(durable !== undefined ? { durable } : {}),
       ...(process.stdin.isTTY === true && values.yes !== true
         ? { confirmReplace: confirmHarnessReplacement }
         : {}),

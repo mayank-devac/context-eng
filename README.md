@@ -8,7 +8,7 @@ Local project memory router for Codex and Claude Code. Memories live in one SQLi
 - Run the command from within your project repository, not from your home directory.
 
 ```bash
-npx context-eng@0.1.3 init
+npx context-eng@0.1.4 init
 ```
 
 ```bash
@@ -18,7 +18,7 @@ pnpm dlx context-eng init
 Alternatively, install or update the global command, then configure your memory tools:
 
 ```sh
-npm install -g context-eng@0.1.3 --prefer-online --registry https://registry.npmjs.org &&
+npm install -g context-eng@0.1.4 --prefer-online --registry https://registry.npmjs.org &&
 context-eng init
 ```
 
@@ -198,7 +198,7 @@ context-eng init --postsession manual --harness codex --scope project --project 
 Or use `npx` without a global installation:
 
 ```sh
-npx context-eng@0.1.3 init --postsession manual --harness codex --scope project --project /path/to/repo
+npx context-eng@0.1.4 init --postsession manual --harness codex --scope project --project /path/to/repo
 ```
 
 This command installs the manual saving skill only; it does not configure the memory tools. It works through `npx` because the skill uses the host's current model and connected tools, with no persistent hook command pointing into the temporary package cache.
@@ -314,7 +314,7 @@ flowchart TD
 
 Node.js 20 or newer.
 
-One command, after this package is published. It asks for the TypeSafe key, then detects Cursor, Claude Code, and Codex. In a terminal the installed ones start selected. Space turns one off, Enter confirms, and init writes a user-level MCP server only for the ones left selected. It then asks whether to install prompt-box hooks; if you choose yes, select recall mode, post-session saving, and the Claude/Codex hosts. The wizard configures global hooks; use the explicit `--scope project --project <path>` hook commands when a hook should belong to one project. A different existing `context-eng` setup needs confirmation before replacement. In a non-terminal session, or with `--yes`, the hook wizard does not run. That server is `npx -y context-eng mcp` when `npx` is on PATH, otherwise `pnpm dlx context-eng mcp`. Global configs omit `--project`.
+One command, after this package is published. It asks for the TypeSafe key, then detects Cursor, Claude Code, and Codex. In a terminal the installed ones start selected. Space turns one off, Enter confirms, and init writes a user-level MCP server only for the ones left selected. It then asks whether to install prompt-box hooks; if you choose yes, select recall mode, post-session saving, and the Claude/Codex hosts. The wizard configures global hooks; use the explicit `--scope project --project <path>` hook commands when a hook should belong to one project. A different existing `context-eng` setup needs confirmation before replacement. In a non-terminal session, or with `--yes`, the hook wizard does not run. When init runs from a global install, the server is the absolute `node` path plus the absolute `dist/cli-entry.js` path, for example `/usr/local/bin/node /usr/local/lib/node_modules/context-eng/dist/cli-entry.js mcp`. Only when init runs from a temporary `npx`/`pnpm dlx` cache (or on Windows) does it fall back to `npx -y context-eng mcp`, or `pnpm dlx context-eng mcp` without `npx`, and it prints a warning. The fallback is weaker because `npx` finds the package by name from the current folder: inside any folder whose `package.json` is also named `context-eng`, it runs that folder's code instead. An existing `npx` entry is offered for replacement when you rerun init. If you switch Node versions, rerun `context-eng init` so the paths point at the new install. Global configs omit `--project`.
 
 When init runs from a temporary `npx` or `pnpm dlx` cache, MCP setup completes and the hook wizard is skipped with an explanation. To choose hooks, run `npm install -g context-eng`, then `context-eng init` from that durable installation. A stable source checkout can also run the wizard.
 
