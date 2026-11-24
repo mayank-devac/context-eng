@@ -265,6 +265,6 @@ describe("TypeSafe relevance gate", () => {
     await expect(evaluator.evaluate("useful memory", [hit("slow")])).rejects.toThrow(
       "TypeSafe relevance evaluation timed out after 5ms.",
     );
-    expect(DEFAULT_JEV_TIMEOUT_MS).toBe(20_000);
+    expect(DEFAULT_JEV_TIMEOUT_MS).toBe(10_000);
   });
 });

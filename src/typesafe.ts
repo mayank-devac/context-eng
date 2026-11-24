@@ -8,7 +8,7 @@ import { MAX_JEV_BATCHES, MAX_JEV_CANDIDATES } from "./categories.js";
 
 const DEFAULT_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 /** @context-eng-locked Jev request deadline. Do not change unless the user asks. */
-export const DEFAULT_JEV_TIMEOUT_MS = 20_000;
+export const DEFAULT_JEV_TIMEOUT_MS = 10_000;
 
 export const RELEVANCE_THRESHOLD = 0.5;
 export const NOT_RELEVANT_MESSAGE =

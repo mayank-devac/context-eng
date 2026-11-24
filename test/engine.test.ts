@@ -205,7 +205,7 @@ describe("summary map refreshes", () => {
       scope: "project", category: "decision", content: "Keep recall map reads lightweight.",
     });
     context.engine.close();
-    const layout = layoutFor(project, home);
+    const layout = layoutFor(resolveProjectPath(project), home);
     writeFileSync(layout.globalMapMd, "global sentinel\n");
     writeFileSync(layout.globalMapJson, "{\"global\":\"sentinel\"}\n");
     writeFileSync(layout.projectMapMd, "project sentinel\n");
@@ -229,7 +229,7 @@ describe("summary map refreshes", () => {
     const context = openIsolatedEngine();
     cleanup = context.cleanup;
     const { engine, home, project } = context;
-    const layout = layoutFor(project, home);
+    const layout = layoutFor(resolveProjectPath(project), home);
     const created = engine.create({ scope: "project", category: "research", content: "Keep maps current after create." });
     expect(JSON.parse(readFileSync(layout.projectMapJson, "utf8")).staging.count).toBe(1);
 

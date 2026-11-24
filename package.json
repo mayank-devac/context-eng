@@ -30,7 +30,9 @@
     "inspect:search": "tsx src/inspect-cli.ts",
     "start": "node dist/cli-entry.js mcp",
     "test": "vitest run",
-    "lint": "eslint src test"
+    "lint": "eslint src test",
+    "release": "bash scripts/release.sh",
+    "update-device": "bash scripts/release.sh update"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

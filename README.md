@@ -12,7 +12,7 @@ Local project memory router for Codex and Claude Code. Memories live in one SQLi
 Install the command globally, then run setup:
 
 ```sh
-npm install -g context-eng@0.1.4 --prefer-online --registry https://registry.npmjs.org &&
+npm install -g context-eng@latest --prefer-online --registry https://registry.npmjs.org &&
 context-eng init
 ```
 
@@ -23,7 +23,7 @@ A global install matters: `init` then writes the full path to `node` and to the 
 ### Try without installing
 
 ```bash
-npx context-eng@0.1.4 init
+npx context-eng@latest init
 ```
 
 ```bash
@@ -31,6 +31,16 @@ pnpm dlx context-eng init
 ```
 
 This works, but the apps then start the server with `npx -y context-eng mcp`, and `init` prints a warning. `npx` finds the package by name starting from the current folder. So inside any folder whose `package.json` is also named `context-eng`, it runs that folder's code instead. Install globally when you keep using it.
+
+### Update
+
+```sh
+npm install -g context-eng@latest --prefer-online --registry https://registry.npmjs.org
+```
+
+Then restart Claude Code, Codex, or Cursor so they load the new version, and run `context-eng doctor`. You only need to rerun `context-eng init` if you also switched Node versions.
+
+From a checkout of this repo, `npm run update-device` does the same install, repairs a stale vite-plus `context-eng` link if it finds one, prints the installed version, and runs `doctor`.
 
 ### Check your setup: `context-eng doctor`
 
@@ -52,6 +62,7 @@ Each line is `ok`, `WARN` (starts through `npx`/`pnpm dlx`), or `ERROR` (points 
 | `doctor` shows `ERROR ... missing .../bin/node` | You upgraded or removed the Node version context-eng was installed with | `npm install -g context-eng`, then `context-eng init` (and `context-eng init --recall manual` if you use hooks) |
 | `doctor` shows `WARN ... uses npx` | Setup ran from `npx`/`pnpm dlx` | Install globally (above), rerun `context-eng init`, and say yes to replacing the old entry |
 | Memory tools missing in the app | App not restarted, or setup skipped it | Restart the app; run `context-eng doctor` |
+| `readlink ~/.vite-plus/bin/context-eng` points at an older Node version | A vite-plus update moved its link back | `npm run update-device` from the repo, or `ln -sf "$(npm prefix -g)/bin/context-eng" ~/.vite-plus/bin/context-eng` |
 | `context-eng: refusing to start: N copies are already nested` | Something keeps starting context-eng in a loop; the copy limit stopped it | Run `context-eng doctor` and fix what it reports |
 | CPU stuck at 100% with many `sh`/`context-eng` processes (versions before 0.1.4) | An old `npx` cache link plus a missing `#!` line made copies start copies | Quit the apps, run `pkill -STOP -f context-eng; pkill -KILL -f context-eng`, delete stale `~/.npm/_npx` folders, then install 0.1.4 globally and rerun `init` |
 
@@ -242,7 +253,7 @@ context-eng init --postsession manual --harness codex --scope project --project 
 Or use `npx` without a global installation:
 
 ```sh
-npx context-eng@0.1.4 init --postsession manual --harness codex --scope project --project /path/to/repo
+npx context-eng@latest init --postsession manual --harness codex --scope project --project /path/to/repo
 ```
 
 This command installs the manual saving skill only; it does not configure the memory tools. It works through `npx` because the skill uses the host's current model and connected tools, with no persistent hook command pointing into the temporary package cache.
@@ -291,7 +302,7 @@ node --import tsx src/cli-entry.ts recall --project . --query "Fix login"
 
 By default, `recall` searches promoted project and global memories. With no `--project`, it uses `CONTEXT_ENG_PROJECT` or the current directory. Pass the repository root explicitly when running from a subdirectory. `--scope project` or `--scope global` narrows the search; global-only recall does not bind a project. `--limit 5` lowers the maximum number of returned memories, within the existing 4000-token budget.
 
-It uses the same semantic relevance check and local fallback as `memory_search`. `--local` skips the keychain and external service and uses local word matching only. The semantic service can take up to its existing 20-second request deadline before falling back. Printed memories include their update date, category, and project.
+It uses the same semantic relevance check and local fallback as `memory_search`. `--local` skips the keychain and external service and uses local word matching only. The semantic service can take up to its 5-second request deadline before falling back. Printed memories include their update date, category, and project.
 
 Standard output contains the memory context. Warnings and errors go to standard error. No matches is a successful result with a `no matching memory.` message; invalid inputs and retrieval failures exit with status 1. The command does not create or edit memory claims, but opening the engine can initialise storage, migrate older databases, and refresh maps as usual.
 
@@ -304,7 +315,7 @@ The terminal command itself does not install hooks. Use the prompt-box setup abo
 - An MCP started without `--project` has no project layout. Global-only search/create and the global portions of map/category discovery still work. Project or both-scope operations return `PROJECT_NOT_BOUND` until you retry that call with `projectPath` or call `memory_bind`; id-based tools require `memory_bind` because they do not accept `projectPath`.
 - With `TYPESAFE_API_KEY`, searches with at most 60 eligible rows and 12,000 eligible tokens send every row to Jev. Larger searches merge FTS5 matches, exact hint-label matches, one conservative typo retry, and priority fill; Jev evaluates the first 90 in batches of 30.
 - Optional `hints.topics`, `hints.tags`, `hints.links`, and `hints.categories` boost candidate selection but never act as hard filters. Exact label matches are preserved in the local fallback.
-- Without the key, or when Jev fails or exceeds its 20-second request deadline (`DEFAULT_JEV_TIMEOUT_MS`, locked), the tool uses local lexical and exact-label retrieval.
+- Without the key, or when Jev fails or exceeds its 5-second request deadline (`DEFAULT_JEV_TIMEOUT_MS`, locked), the tool uses local lexical and exact-label retrieval.
 - At most 50 relevant contexts and approximately 4000 tokens are returned after a short retrieval mode/count line.
 
 Jev receives only the agent prompt and an array of memory-content strings; category, scope, importance, IDs, and other memory metadata stay local.
@@ -485,7 +496,20 @@ npm run typecheck:test
 npm run lint
 ```
 
+## Release
 
+```sh
+npm run release              # patch bump, e.g. 0.1.5 -> 0.1.6
+npm run release -- minor     # or major, or an exact version like 0.2.0
+```
+
+`scripts/release.sh` stops at the first failure. In order, it:
+
+1. Checks the npm login and the `master` branch, and asks before including uncommitted changes.
+2. Runs `npm ci`, lint, both typechecks, and the tests.
+3. Bumps the version in `package.json`, `package-lock.json`, and `src/mcp.ts`, builds, and shows the package contents.
+4. Asks for confirmation, then commits `Release <version>`, tags `v<version>`, runs `npm publish`, and pushes the commit and tag.
+5. Installs the new version on this machine (the same steps as `npm run update-device`).
 
 ## Related docs
 
