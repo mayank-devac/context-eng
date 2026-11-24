@@ -2,13 +2,13 @@ import { chmodSync, existsSync, lstatSync, readFileSync, readlinkSync, statSync,
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeConfigAtomically } from "./harness.js";
+import { type JsonObject, parseJsonObject, plainObject } from "./json-config.js";
 import { HOOK_TIMEOUT_SECONDS, type RecallHarness, type RecallMode } from "./hooks.js";
 import { resolveProjectPath } from "./paths.js";
 
 const OWNER = "context-eng:recall";
 const OWNER_ARGUMENT = " --context-eng-recall";
 export type RecallInstallScope = "global" | "project";
-type JsonObject = Record<string, unknown>;
 
 export interface HookRuntime {
   nodePath: string;
@@ -41,24 +41,22 @@ export interface RecallInstallResult {
 }
 
 function object(value: unknown, label: string): JsonObject {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be a JSON object; left unchanged`);
-  }
-  return value as JsonObject;
+  if (!plainObject(value)) throw new Error(`${label} must be a JSON object; left unchanged`);
+  return value;
 }
 
 type CommandHookEvent = "UserPromptSubmit" | "Stop";
 
 function hookConfig(existing: string | null, eventName: CommandHookEvent) {
-  let parsed: unknown = {};
+  let root: JsonObject = {};
   if (existing !== null) {
     try {
-      parsed = JSON.parse(existing);
-    } catch {
-      throw new Error("Hook configuration is invalid JSON; left unchanged");
+      root = parseJsonObject(existing, "Hook configuration");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`${message}; left unchanged`, { cause: error });
     }
   }
-  const root = object(parsed, "Hook configuration");
   const hooks = root.hooks === undefined ? {} : object(root.hooks, "hooks");
   const event = hooks[eventName] === undefined ? [] : hooks[eventName];
   if (!Array.isArray(event)) throw new Error(`${eventName} must be an array; left unchanged`);

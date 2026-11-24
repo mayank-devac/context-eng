@@ -14,6 +14,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import { parseJsonObject, plainObject } from "./json-config.js";
 
 export const PACKAGE_NAME = "context-eng";
 
@@ -138,24 +139,6 @@ function displayHomePath(home: string, file: string): string {
   return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel) ? `~/${rel.split(path.sep).join("/")}` : file;
 }
 
-function parseJsonObject(existing: string, label: string): Record<string, unknown> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(existing);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`invalid JSON (${message})`, { cause: error });
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error(`${label} must be a JSON object`);
-  }
-  return parsed as Record<string, unknown>;
-}
-
-function plainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /** True when `mcp.servers` is the V2 server map, not a legacy server that happens to be named "servers". */
 function hasV2Servers(mcp: Record<string, unknown>): boolean {
   return plainObject(mcp.servers) && typeof mcp.servers.type !== "string";
@@ -203,24 +186,11 @@ export function upsertMcpJson(
   serverName: string,
   server: Record<string, unknown>,
 ): string {
-  let root: Record<string, unknown> = {};
-  if (existing !== null && existing.trim() !== "") {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(existing);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`invalid JSON (${message})`, { cause: error });
-    }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      throw new Error("MCP config must be a JSON object");
-    }
-    root = { ...(parsed as Record<string, unknown>) };
-  }
-  const current = root.mcpServers;
-  const servers = typeof current === "object" && current !== null && !Array.isArray(current)
-    ? { ...(current as Record<string, unknown>) }
+  const root: Record<string, unknown> = existing !== null && existing.trim() !== ""
+    ? { ...parseJsonObject(existing, "MCP config") }
     : {};
+  const current = root.mcpServers;
+  const servers = plainObject(current) ? { ...current } : {};
   servers[serverName] = server;
   root.mcpServers = servers;
   return `${JSON.stringify(root, null, 2)}\n`;
@@ -525,24 +495,11 @@ async function writeHarness(
 
 function existingMcpServer(existing: string | null): { found: boolean; value?: unknown } {
   if (existing === null || existing.trim() === "") return { found: false };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(existing);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`invalid JSON (${message})`, { cause: error });
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error("MCP config must be a JSON object");
-  }
-  const servers = (parsed as Record<string, unknown>).mcpServers;
+  const servers = parseJsonObject(existing, "MCP config").mcpServers;
   if (servers === undefined) return { found: false };
-  if (typeof servers !== "object" || servers === null || Array.isArray(servers)) {
-    throw new Error("mcpServers must be a JSON object");
-  }
-  const entries = servers as Record<string, unknown>;
-  return Object.hasOwn(entries, PACKAGE_NAME)
-    ? { found: true, value: entries[PACKAGE_NAME] }
+  if (!plainObject(servers)) throw new Error("mcpServers must be a JSON object");
+  return Object.hasOwn(servers, PACKAGE_NAME)
+    ? { found: true, value: servers[PACKAGE_NAME] }
     : { found: false };
 }
 
