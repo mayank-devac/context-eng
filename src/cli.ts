@@ -31,6 +31,7 @@ import {
   type DurableRuntime,
   type HarnessId,
 } from "./harness.js";
+import { formatDoctor, runDoctor } from "./doctor.js";
 import { runStdio } from "./mcp.js";
 import { resolveProjectPath } from "./paths.js";
 import { installPostsessionHook, parsePostsessionMode, runPostsessionHook } from "./postsession.js";
@@ -54,6 +55,7 @@ const CLAUDE_RULE_FILE = "context-eng-memory.md";
 
 const USAGE = `Usage:
   context-eng mcp [--project <path>]
+  context-eng doctor [--project <path>]
   context-eng recall --query <text> [--project <path>] [--scope global|project|both] [--limit <1-50>] [--local]
   context-eng init [--project <path>] [--yes]
   context-eng init --recall manual|automatic|off [--harness claude|codex] [--scope global|project] [--project <path>] [--local] [--yes]
@@ -448,8 +450,16 @@ export async function main(): Promise<void> {
   }
 
   const command = positionals[0];
-  if (command !== "mcp" && command !== "init" && command !== "recall" && command !== "hook" && command !== "postsession") {
+  if (command !== "mcp" && command !== "init" && command !== "recall" && command !== "hook" && command !== "postsession" &&
+    command !== "doctor") {
     usage();
+  }
+
+  if (command === "doctor") {
+    const findings = runDoctor({ home: os.homedir(), projectPath: resolveProjectPath(values.project) });
+    console.log(formatDoctor(findings));
+    process.exitCode = findings.some((item) => item.level !== "ok") ? 1 : 0;
+    return;
   }
 
   if (command === "postsession") {

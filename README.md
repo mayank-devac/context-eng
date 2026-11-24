@@ -7,6 +7,21 @@ Local project memory router for Codex and Claude Code. Memories live in one SQLi
 - Requires Node.js 20 or newer.
 - Run the command from within your project repository, not from your home directory.
 
+### Install (recommended)
+
+Install the command globally, then run setup:
+
+```sh
+npm install -g context-eng@0.1.4 --prefer-online --registry https://registry.npmjs.org &&
+context-eng init
+```
+
+The `&&` runs setup only if installation succeeds. Restart Claude Code, Codex, or Cursor after setup so they load the memory tools. To enable manual saving as well, see [Save a learning manually](#save-a-learning-manually).
+
+A global install matters: `init` then writes the full path to `node` and to the installed `context-eng` into your app configs. Your apps start that exact file, in any folder, with no download and no lookup.
+
+### Try without installing
+
 ```bash
 npx context-eng@0.1.4 init
 ```
@@ -15,14 +30,43 @@ npx context-eng@0.1.4 init
 pnpm dlx context-eng init
 ```
 
-Alternatively, install or update the global command, then configure your memory tools:
+This works, but the apps then start the server with `npx -y context-eng mcp`, and `init` prints a warning. `npx` finds the package by name starting from the current folder. So inside any folder whose `package.json` is also named `context-eng`, it runs that folder's code instead. Install globally when you keep using it.
+
+### Check your setup: `context-eng doctor`
 
 ```sh
-npm install -g context-eng@0.1.4 --prefer-online --registry https://registry.npmjs.org &&
-context-eng init
+context-eng doctor
 ```
 
-The `&&` runs setup only if installation succeeds. Restart your app after setup so it can load the memory tools. To enable manual saving as well, see [Save a learning manually](#save-a-learning-manually).
+`doctor` only reads files. It never changes them. It checks every place that starts context-eng:
+
+- MCP servers in `~/.claude.json`, `~/.cursor/mcp.json`, `~/.codex/config.toml`
+- prompt hooks in `~/.claude/settings.json`, `~/.codex/hooks.json`, and the current project's `.claude/` and `.codex/` hook files
+
+Each line is `ok`, `WARN` (starts through `npx`/`pnpm dlx`), or `ERROR` (points at a file that no longer exists, for example after you switch or remove a Node version). It exits with code 1 when it finds a problem. Use `--project <path>` to check another project's hook files.
+
+### Fix common problems
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `doctor` shows `ERROR ... missing .../bin/node` | You upgraded or removed the Node version context-eng was installed with | `npm install -g context-eng`, then `context-eng init` (and `context-eng init --recall manual` if you use hooks) |
+| `doctor` shows `WARN ... uses npx` | Setup ran from `npx`/`pnpm dlx` | Install globally (above), rerun `context-eng init`, and say yes to replacing the old entry |
+| Memory tools missing in the app | App not restarted, or setup skipped it | Restart the app; run `context-eng doctor` |
+| `context-eng: refusing to start: N copies are already nested` | Something keeps starting context-eng in a loop; the copy limit stopped it | Run `context-eng doctor` and fix what it reports |
+| CPU stuck at 100% with many `sh`/`context-eng` processes (versions before 0.1.4) | An old `npx` cache link plus a missing `#!` line made copies start copies | Quit the apps, run `pkill -STOP -f context-eng; pkill -KILL -f context-eng`, delete stale `~/.npm/_npx` folders, then install 0.1.4 globally and rerun `init` |
+
+### Built-in safety (0.1.4+)
+
+- Every file that can be run as a command starts with `#!/usr/bin/env node`, so the system always runs it with Node, never as a shell script.
+- Copy limit: each run sets `CONTEXT_ENG_DEPTH`. context-eng never starts itself, so normal depth is 1. If copies start copies, the third nested copy exits at once (in a few milliseconds) instead of starting more.
+
+### Uninstall
+
+```sh
+npm uninstall -g context-eng
+```
+
+Then remove the `context-eng` entry from `~/.claude.json`, `~/.cursor/mcp.json`, and `[mcp_servers.context-eng]` in `~/.codex/config.toml`, and any hook whose command contains `context-eng` in `~/.claude/settings.json` or `~/.codex/hooks.json`. Your memories stay in `~/.context` (or `$CONTEXT_ENG_HOME`) until you delete that folder.
 
 To set up a different folder than the one you are in:
 
