@@ -125,6 +125,13 @@ function shellQuote(value: string): string {
 
 export function validateHookRuntime(runtime: HookRuntime): void {
   if (process.platform === "win32") throw new Error("Hook installation currently supports macOS and Linux");
+  validateDurableRuntime(runtime);
+}
+
+// The runtime is an installed node + entry file, not a temporary npx/dlx cache.
+// Works on every platform: the MCP launch passes these paths as separate
+// arguments, so it needs none of the POSIX shell quoting that hooks rely on.
+export function validateDurableRuntime(runtime: HookRuntime): void {
   if ([runtime.entryPath, runtime.nodePath, runtime.loader ?? ""].some((value) => /[/\\](?:_npx|dlx)[/\\]/.test(value))) {
     throw new Error("The current runtime is in a temporary package cache. Install context-eng globally, then rerun hook setup.");
   }

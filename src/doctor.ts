@@ -29,17 +29,42 @@ function readOptional(file: string): string | null {
   }
 }
 
+/** The path functions doctor needs; tests pass path.win32 to check Windows rules on any OS. */
+export type PathApi = Pick<typeof path, "isAbsolute">;
+
+const PACKAGE_RUNNER = /^(?:npx|pnpm)(?:\.cmd|\.exe|\.ps1)?$/i;
+const CMD_SHELL = /^cmd(?:\.exe)?$/i;
+
+// win32 basename splits on both / and \, so it reads POSIX and Windows paths alike.
+function programName(word: string | undefined): string {
+  return path.win32.basename(word ?? "");
+}
+
+// `cmd /c npx ...` (the wrapper Windows needs for .cmd launchers) -> `npx ...`.
+// Dropping the cmd switches also keeps `/c` from counting as a rooted path on Windows.
+function unwrapCmd(words: readonly string[]): readonly string[] {
+  if (!CMD_SHELL.test(programName(words[0]))) return words;
+  const run = words.findIndex((word) => /^\/[ck]$/i.test(word));
+  return run === -1 ? words : words.slice(run + 1);
+}
+
 /** Checks one launch, given as its separate words (command first). */
-export function checkLaunch(file: string, what: string, words: readonly string[], exists: Exists): DoctorFinding {
-  const program = path.basename(words[0] ?? "");
-  if (program === "npx" || program === "pnpm" || words.includes("dlx")) {
+export function checkLaunch(
+  file: string,
+  what: string,
+  launch: readonly string[],
+  exists: Exists,
+  paths: PathApi = path,
+): DoctorFinding {
+  const words = unwrapCmd(launch);
+  if (PACKAGE_RUNNER.test(programName(words[0])) || words.includes("dlx")) {
     return { level: "warn", file, what, message: NPX_HINT };
   }
-  const missing = words.filter((word) => path.isAbsolute(word) && !exists(word));
+  const missing = words.filter((word) => paths.isAbsolute(word) && !exists(word));
   if (missing.length > 0) {
     return { level: "error", file, what, message: `missing ${missing.join(", ")}; ${MISSING_HINT}` };
   }
-  return { level: "ok", file, what, message: words.join(" ") };
+  return { level: "ok", file, what, message: launch.join(" ") };
 }
 
 /** Splits a hook command written by hookRuntimeCommand: 'quoted' words or bare words. */

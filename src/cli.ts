@@ -10,6 +10,7 @@ import { Engine } from "./engine.js";
 import {
   currentHookRuntime,
   installRecallHooks,
+  validateDurableRuntime,
   validateHookRuntime,
   type HookRuntime,
   type RecallInstallOptions,
@@ -278,7 +279,7 @@ export function writeClaudeRules(
 function durableMcpRuntime(): DurableRuntime | undefined {
   try {
     const runtime = currentHookRuntime();
-    validateHookRuntime(runtime);
+    validateDurableRuntime(runtime);
     if (runtime.loader !== undefined) return undefined;
     return { nodePath: runtime.nodePath, entryPath: runtime.entryPath };
   } catch {

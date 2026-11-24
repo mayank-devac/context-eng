@@ -44,6 +44,35 @@ describe("doctor", () => {
     expect(checkLaunch("f", "MCP server", ["/good/node", "/good/cli-entry.js", "mcp"], exists).level).toBe("ok");
   });
 
+  describe("on Windows (path.win32)", () => {
+    const winExists = (file: string) => file.toLowerCase().startsWith("c:\\good\\");
+    const check = (words: string[]) => checkLaunch("f", "MCP server", words, winExists, path.win32);
+
+    it("warns on the cmd /c npx wrapper instead of reporting /c as a missing path", () => {
+      expect(path.win32.isAbsolute("/c")).toBe(true);
+      expect(check(["cmd", "/c", "npx", "-y", "context-eng", "mcp"]).level).toBe("warn");
+      expect(check(["C:\\Windows\\System32\\cmd.exe", "/d", "/s", "/c", "npx", "context-eng", "mcp"]).level).toBe("warn");
+    });
+
+    it("warns on npx.cmd and pnpm.cmd launchers given by full path", () => {
+      expect(check(["C:\\Program Files\\nodejs\\npx.cmd", "-y", "context-eng", "mcp"]).level).toBe("warn");
+      expect(check(["PNPM.CMD", "dlx", "context-eng", "mcp"]).level).toBe("warn");
+      expect(check(["npx.exe", "context-eng", "mcp"]).level).toBe("warn");
+    });
+
+    it("checks drive-letter paths, including inside cmd /c", () => {
+      expect(check(["C:\\good\\node.exe", "C:\\good\\cli-entry.js", "mcp"]).level).toBe("ok");
+      expect(check(["cmd", "/c", "C:\\good\\node.exe", "C:\\good\\cli-entry.js", "mcp"]).level).toBe("ok");
+      expect(check(["C:\\gone\\node.exe", "C:\\good\\cli-entry.js", "mcp"])).toMatchObject({
+        level: "error", message: expect.stringContaining("C:\\gone\\node.exe"),
+      });
+    });
+  });
+
+  it("does not mistake a package named like npx for the launcher", () => {
+    expect(checkLaunch("f", "MCP server", ["/good/node", "/good/npx-helper.js"], exists).level).toBe("ok");
+  });
+
   it("splits quoted hook commands", () => {
     expect(shellWords("'/a b/node' '/x/cli-entry.js' 'hook' --context-eng-recall")).toEqual([
       "/a b/node", "/x/cli-entry.js", "hook", "--context-eng-recall",
