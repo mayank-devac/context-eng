@@ -12,6 +12,18 @@ Local project memory router for Codex, Claude Code, Cursor, and OpenCode. Memori
 Install the command globally, then run setup:
 
 ```sh
+npm install -g context-eng@latest
+```
+
+#### 2. Set up context-eng
+
+```sh
+context-eng init
+```
+----
+One-shot command 
+
+```sh
 npm install -g context-eng@latest --prefer-online --registry https://registry.npmjs.org &&
 context-eng init
 ```
