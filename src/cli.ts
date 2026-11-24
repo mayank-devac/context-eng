@@ -87,6 +87,13 @@ interface CliOptions {
   "opencode-only"?: boolean;
 }
 
+const ONLY_FLAGS = ["claude-only", "codex-only", "cursor-only", "opencode-only"] as const;
+
+/** True when any --<harness>-only flag was passed. */
+function anyOnlyFlag(values: CliOptions): boolean {
+  return ONLY_FLAGS.some((flag) => values[flag] === true);
+}
+
 export function upsertMarkedBlock(existing: string | null, block: string): string {
   const unit = block.trimEnd();
   if (existing == null || existing.trim() === "") {
@@ -132,6 +139,13 @@ function writePointer(file: string, block: string): void {
   writeFileSync(file, upsertMarkedBlock(existing, block), "utf8");
 }
 
+/** Creates the file's folder if needed, writes the pointer block, and returns the file. */
+export function writePointerFile(block: string, file: string): string {
+  mkdirSync(path.dirname(file), { recursive: true });
+  writePointer(file, block);
+  return file;
+}
+
 export function updateExistingPointer(file: string, block: string): boolean {
   if (!existsSync(file)) return false;
   writePointer(file, block);
@@ -153,10 +167,7 @@ export function codexAgentsPath(home = os.homedir()): string {
 }
 
 export function writeCodexAgentsPointer(block: string, home = os.homedir()): string {
-  const file = codexAgentsPath(home);
-  mkdirSync(path.dirname(file), { recursive: true });
-  writePointer(file, block);
-  return file;
+  return writePointerFile(block, codexAgentsPath(home));
 }
 
 /**
@@ -168,8 +179,7 @@ export function writeOpencodeAgentsPointer(
   block: string, home = os.homedir(), env: NodeJS.ProcessEnv = process.env,
 ): OpencodeRulesFile {
   const rules = opencodeRulesFile(home, env);
-  mkdirSync(path.dirname(rules.file), { recursive: true });
-  writePointer(rules.file, block);
+  writePointerFile(block, rules.file);
   return rules;
 }
 
@@ -257,24 +267,15 @@ export function globalClaudeAgentsPath(home = os.homedir()): string {
 }
 
 export function writeGlobalClaudePointer(block: string, home = os.homedir()): string {
-  const file = globalClaudeAgentsPath(home);
-  mkdirSync(path.dirname(file), { recursive: true });
-  writePointer(file, block);
-  return file;
+  return writePointerFile(block, globalClaudeAgentsPath(home));
 }
 
 export function claudeRulePath(projectPath: string): string {
   return path.join(projectPath, ".claude", "rules", CLAUDE_RULE_FILE);
 }
 
-export function writeClaudeRuleFile(block: string, file: string): string {
-  mkdirSync(path.dirname(file), { recursive: true });
-  writePointer(file, block);
-  return file;
-}
-
 export function writeClaudeRule(block: string, projectPath: string): string {
-  return writeClaudeRuleFile(block, claudeRulePath(projectPath));
+  return writePointerFile(block, claudeRulePath(projectPath));
 }
 
 export function writeClaudeRules(
@@ -290,7 +291,7 @@ export function writeClaudeRules(
     if (opts.project === undefined) {
       throw new Error("scope project or both requires --project <path>");
     }
-    files.push(writeClaudeRuleFile(block, claudeRulePath(resolveProjectPath(opts.project))));
+    files.push(writePointerFile(block, claudeRulePath(resolveProjectPath(opts.project))));
   }
   return files;
 }
@@ -523,7 +524,7 @@ export async function main(): Promise<void> {
   if (command === "postsession") {
     if (values.scope !== undefined || values.query !== undefined || values.limit !== undefined || values.local !== undefined ||
       values.mode !== undefined || values.recall !== undefined || values.postsession !== undefined || values["context-eng-recall"] !== undefined ||
-      values.yes || values["codex-only"] || values["claude-only"] || values["cursor-only"] || values["opencode-only"]) {
+      values.yes || anyOnlyFlag(values)) {
       throw new Error("postsession only accepts --harness and --project");
     }
     if (!values.harness) throw new Error("postsession requires --harness claude or codex");
@@ -535,7 +536,7 @@ export async function main(): Promise<void> {
 
   if (command === "hook") {
     if (values.scope !== undefined || values.query !== undefined || values.limit !== undefined || values.recall !== undefined || values.postsession !== undefined ||
-      values.yes || values["codex-only"] || values["claude-only"] || values["cursor-only"] || values["opencode-only"]) {
+      values.yes || anyOnlyFlag(values)) {
       throw new Error("hook only accepts --harness, --mode, --project, and --local");
     }
     if (!values.harness) throw new Error("hook requires --harness claude or codex");
@@ -566,7 +567,7 @@ export async function main(): Promise<void> {
   }
 
   if (command === "recall") {
-    if (values.yes || values["codex-only"] || values["cursor-only"] || values["claude-only"] || values["opencode-only"]) {
+    if (values.yes || anyOnlyFlag(values)) {
       throw new Error("recall does not accept init options");
     }
     if (!values.query?.trim()) throw new Error("recall requires --query <text>");
@@ -610,7 +611,7 @@ export async function main(): Promise<void> {
     return;
   }
 
-  if (values["codex-only"] || values["cursor-only"] || values["claude-only"] || values["opencode-only"]) {
+  if (anyOnlyFlag(values)) {
     const block = agentPointerBlock();
     if (values["codex-only"]) {
       console.log(`Updated ${writeCodexAgentsPointer(block)}`);
