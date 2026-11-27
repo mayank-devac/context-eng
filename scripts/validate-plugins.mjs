@@ -15,7 +15,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const KEBAB = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 // Allowed top-level manifest keys, from each host's schema or reference.
-const CLAUDE_KEYS = ["$schema", "name", "displayName", "version", "description", "author", "homepage", "repository", "license", "keywords", "metadata", "defaultEnabled", "engines", "dependencies", "userConfig", "skills", "commands", "agents", "hooks", "mcpServers", "lspServers", "outputStyles"];
+const CLAUDE_KEYS = ["$schema", "name", "displayName", "version", "description", "author", "homepage", "repository", "license", "keywords", "metadata", "defaultEnabled", "engines", "dependencies", "userConfig", "skills", "commands", "agents", "hooks", "mcpServers", "lspServers", "outputStyles", "network"];
 const CURSOR_KEYS = ["name", "displayName", "description", "version", "minClientVersions", "author", "publisher", "homepage", "repository", "license", "logo", "keywords", "category", "tags", "commands", "agents", "skills", "rules", "hooks", "variables", "mcpServers"];
 const CODEX_KEYS = ["$schema", "name", "version", "description", "author", "homepage", "repository", "license", "keywords", "skills", "mcpServers", "apps", "hooks", "interface", "extensions"];
 const ANTIGRAVITY_KEYS = ["$schema", "name", "displayName", "description", "version", "logo", "suggestedPrompts", "skills", "disabled", "author", "homepage", "repository", "license", "keywords", "extensions"];

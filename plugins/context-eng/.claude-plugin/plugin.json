@@ -7,5 +7,6 @@
   "homepage": "https://github.com/mayank-devac/context-eng#readme",
   "repository": "https://github.com/mayank-devac/context-eng",
   "license": "MIT",
-  "keywords": ["memory", "mcp", "context-engineering", "project-memory", "sqlite"]
+  "keywords": ["memory", "mcp", "context-engineering", "project-memory", "sqlite"],
+  "network": { "hosts": ["api.typesafe.ai", "registry.npmjs.org"] }
 }

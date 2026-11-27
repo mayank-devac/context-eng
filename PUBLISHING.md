@@ -7,7 +7,7 @@ This repo is already a marketplace, so anyone can install the plugin with `claud
 - [ ] `npm test`, `npm run typecheck`, `npm run typecheck:test`, `npm run lint`, and `npm run validate:plugins` all pass.
 - [ ] The version matches in `package.json`, every `plugins/context-eng/*/plugin.json`, and every `marketplace.json`, and a git tag exists for it.
 - [ ] The plugin has an icon: a square PNG, 512 to 2048 px per side, under 2 MB, at `plugins/context-eng/.claude-plugin/icon.png`. The Claude directory keeps the icon from your first save or submission, so add it before then. *(Missing right now.)*
-- [ ] Network hosts are declared under `network.hosts` in `plugin.json`. The plugin runs locally, so an empty list is the honest answer. *(Not declared right now.)*
+- [x] Network hosts are declared under `network.hosts` in the Claude `plugin.json`: `api.typesafe.ai` (memory search relevance; search falls back to local search without it) and `registry.npmjs.org` (the `npx` fallback in `scripts/mcp.mjs`). Update the list if the code starts calling a new host.
 - [ ] `plugins/context-eng/README.md` says what the plugin does, what it stores (a local SQLite memory), and how to uninstall it.
 - [ ] `LICENSE` is present (MIT).
 
