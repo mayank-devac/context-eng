@@ -1,0 +1,5 @@
+#!/bin/sh
+# Installed by `npm install` (scripts/install-git-hooks.mjs sets core.hooksPath).
+# Keeps shared prompt text identical across hosts, then checks the plugin.
+node scripts/sync-prompts.mjs --stage || exit 1
+node scripts/validate-plugins.mjs --quiet || exit 1

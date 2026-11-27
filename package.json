@@ -54,6 +54,9 @@
     "lint": "eslint src test",
     "release": "bash scripts/release.sh",
     "update-device": "bash scripts/release.sh update",
+    "prepare": "node scripts/install-git-hooks.mjs",
+    "sync:prompts": "node scripts/sync-prompts.mjs",
+    "check:prompts": "node scripts/sync-prompts.mjs --check",
     "validate:plugins": "node scripts/validate-plugins.mjs --cli"
   },
   "dependencies": {
