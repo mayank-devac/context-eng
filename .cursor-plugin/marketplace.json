@@ -1,0 +1,12 @@
+{
+  "name": "context-eng",
+  "owner": { "name": "mayank" },
+  "metadata": { "description": "The context-eng memory plugin for Cursor." },
+  "plugins": [
+    {
+      "name": "context-eng",
+      "source": "plugins/context-eng",
+      "description": "Local project memory for coding agents: recall past decisions, mistakes, and preferences, and save new ones."
+    }
+  ]
+}

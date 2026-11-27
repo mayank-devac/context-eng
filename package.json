@@ -53,7 +53,8 @@
     "test": "vitest run",
     "lint": "eslint src test",
     "release": "bash scripts/release.sh",
-    "update-device": "bash scripts/release.sh update"
+    "update-device": "bash scripts/release.sh update",
+    "validate:plugins": "node scripts/validate-plugins.mjs --cli"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

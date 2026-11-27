@@ -1,0 +1,12 @@
+{
+  "name": "context-eng-opencode-plugin",
+  "version": "0.2.0",
+  "description": "OpenCode entry point of the context-eng plugin: adds the memory MCP server, /recall and /postsession commands, and the memory instructions.",
+  "type": "module",
+  "main": "./server.js",
+  "exports": {
+    ".": "./server.js"
+  },
+  "private": true,
+  "license": "MIT"
+}

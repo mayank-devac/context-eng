@@ -67,7 +67,16 @@ fi
 STAGE="checks"
 VERSION=""
 WORK_DIR="$(mktemp -d)"
-VERSION_FILES=(package.json package-lock.json src/mcp.ts)
+# Plugin manifests carry the same version; validate-plugins fails if they drift.
+PLUGIN_VERSION_FILES=(
+  plugins/context-eng/.claude-plugin/plugin.json
+  plugins/context-eng/.cursor-plugin/plugin.json
+  plugins/context-eng/.codex-plugin/plugin.json
+  plugins/context-eng/.antigravity-plugin/plugin.json
+  plugins/context-eng/package.json
+  .claude-plugin/marketplace.json
+)
+VERSION_FILES=(package.json package-lock.json src/mcp.ts "${PLUGIN_VERSION_FILES[@]}")
 
 finish_hint() {
   printf '  git push --atomic origin master v%s\n' "$VERSION"
@@ -140,13 +149,16 @@ npm run typecheck:test
 npm test
 
 say "Bumping version ($BUMP)"
-mkdir -p "$WORK_DIR/backup/src"
-for f in "${VERSION_FILES[@]}"; do cp "$f" "$WORK_DIR/backup/$f"; done
+for f in "${VERSION_FILES[@]}"; do mkdir -p "$WORK_DIR/backup/$(dirname "$f")"; cp "$f" "$WORK_DIR/backup/$f"; done
 STAGE="bumped"
 VERSION="$(npm version "$BUMP" --no-git-tag-version | sed 's/^v//')"
 # The MCP server reports its own version; keep it in sync with package.json.
 sed -i '' -E "s/version: \"[0-9]+\.[0-9]+\.[0-9]+[^\"]*\"/version: \"$VERSION\"/" src/mcp.ts
 grep -q "version: \"$VERSION\"" src/mcp.ts || die "Could not update the version in src/mcp.ts"
+for f in "${PLUGIN_VERSION_FILES[@]}"; do
+  sed -i '' -E "s/\"version\": \"[0-9]+\.[0-9]+\.[0-9]+[^\"]*\"/\"version\": \"$VERSION\"/" "$f"
+done
+node scripts/validate-plugins.mjs --quiet || die "Plugin manifests did not take the new version"
 npm view "context-eng@$VERSION" version --registry "$REGISTRY" >/dev/null 2>&1 \
   && die "context-eng@$VERSION is already on npm."
 git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null \

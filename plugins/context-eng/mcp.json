@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "context-eng": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${PLUGIN_ROOT}/scripts/mcp.mjs", "mcp"]
+    }
+  }
+}

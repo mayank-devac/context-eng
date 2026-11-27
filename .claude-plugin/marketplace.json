@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "context-eng",
+  "description": "The context-eng memory plugin for Claude Code.",
+  "owner": { "name": "mayank", "url": "https://github.com/mayank-devac" },
+  "plugins": [
+    {
+      "name": "context-eng",
+      "description": "Local project memory for coding agents: recall past decisions, mistakes, and preferences, and save new ones.",
+      "version": "0.2.0",
+      "source": "./plugins/context-eng",
+      "category": "productivity"
+    }
+  ]
+}

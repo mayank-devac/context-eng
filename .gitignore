@@ -12,3 +12,5 @@ docs/
 .mcp.json
 docs/plan_stages
 .codex
+# The plugin ships its own Claude Code MCP config
+!plugins/context-eng/.mcp.json

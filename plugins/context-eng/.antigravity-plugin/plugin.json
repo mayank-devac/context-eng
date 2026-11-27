@@ -1,0 +1,17 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "context-eng",
+  "displayName": "context-eng memory",
+  "version": "0.2.0",
+  "description": "Local project memory for coding agents: recall past decisions, mistakes, and preferences, and save new ones, through the context-eng MCP server.",
+  "suggestedPrompts": [
+    "/recall the last decisions about this project",
+    "What do you remember about how we test this repo?",
+    "/postsession"
+  ],
+  "author": { "name": "mayank", "url": "https://github.com/mayank-devac" },
+  "homepage": "https://github.com/mayank-devac/context-eng#readme",
+  "repository": "https://github.com/mayank-devac/context-eng",
+  "license": "MIT",
+  "keywords": ["memory", "mcp", "context-engineering", "project-memory", "sqlite"]
+}
