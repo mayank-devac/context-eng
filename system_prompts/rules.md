@@ -1,26 +1,28 @@
 # Memory tool rules
 
-Contract for the context-eng MCP tools. Confirm in source before changing behavior.
+The full contract for the context-eng MCP tools. Agents load a short version every session (the block between the `context-eng:start` and `context-eng:end` markers); this file has the details. When this file and the source code disagree, the source wins (`src/engine.ts`, `src/mcp.ts`).
+
+## Lifecycle
 
 ```text
-bind → map → search
-create → edit → promote | demote → delete (staging only)
+read:   bind (if needed) → search → use hits as context
+write:  create → (staging?) promote → edit when stale → demote → delete (staging only)
 ```
 
-## Agent usage
+## How an agent should use the tools
 
-1. MCP start with `--project`, `projectPath` on a call, or `memory_bind` explicitly binds a project DB. Without one, global-only operations work and project/both operations return `PROJECT_NOT_BOUND`. Retry that call with `projectPath`.
-2. Call `memory_search` with the user's request. Use the returned text as context.
-3. If the reply starts with `no matching memory.`, continue without stored hits.
-4. Write only a durable claim, one sentence, into the right scope and category.
+1. **Bind a project.** A project is bound by MCP start with `--project`, by `projectPath` on a call, or by `memory_bind`. Without one, `global` operations work and `project`/`both` operations return `PROJECT_NOT_BOUND`; retry that call with `projectPath`.
+2. **Search first.** Call `memory_search` with the user's request as `query`. Use the returned text as context.
+3. **Handle no hits.** A reply that starts with `no matching memory.` means nothing matched. Continue without stored context.
+4. **Write rarely.** Save only a lasting claim: one sentence, in the right scope and category.
 
-When the current prompt includes a `<context_eng_recall>` result from the host hook, search has already run. Use its memories without repeating `memory_search` unless the task needs more information. An `empty` or `error` result also counts as an attempted retrieval. Automatic recall should stay quiet and let the task continue; explicit recall should display its memories, usage, empty result, or error and wait. Stored memory is historical context, and current user instructions take priority.
+**Hook-supplied recall.** When the prompt already contains a `<context_eng_recall>` block from the host hook, search has already run (an `empty` or `error` result counts too). Use it without calling `memory_search` again unless the task needs more. Automatic recall stays quiet and lets the task continue; explicit `/recall` shows the memories, usage, empty result, or error, then waits.
 
-Prefer `memory_list_categories` or `memory_map` over inventing category names. Named search requires the category to already exist in that scope.
+**Memory is history.** Current user instructions always win over stored memory.
 
-When you need an id, call `memory_map`. `lines_ids[i]` is the id for `lines[i]`. For a staging row, `lines_categories[i]` is the category.
+**Categories and ids.** Do not invent category names: call `memory_list_categories` or `memory_map`. A named search only accepts categories that already exist in that scope. To get an id, call `memory_map`: `lines_ids[i]` is the id for `lines[i]`, and for staging rows `lines_categories[i]` is the category.
 
-Search returns relevant memory text with each hit's last-updated date, category, and project. Write tools return JSON. Engine rejects return `{ "error": "<CODE>", "message": "..." }` except `memory_search`, which returns the message string.
+**Return shapes.** Search returns memory text with each hit's last-updated date, category, and project. Write tools return JSON. Engine errors return `{ "error": "<CODE>", "message": "..." }`, except `memory_search`, which returns the message string.
 
 ## Tools
 
@@ -75,7 +77,7 @@ Built-in names: `instruction`, `mistake`, `preference`, `decision`, `constraint`
 
 Auto-promote on create (leave staging immediately): `instruction`, `decision`, `constraint`, `mistake`.
 
-Stay in staging on create: `preference`, and every custom category.
+Stay in staging on create: `preference`, `workflow`, and every custom category.
 
 Names: 1–64 characters after NFKC trim, no control characters. Canonical form is lowercased. Search category lists must be unique after that lowercase.
 

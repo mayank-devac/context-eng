@@ -1,13 +1,27 @@
 ---
 name: recall
-description: Show memories about a task or topic before starting work.
+description: Show stored memories about a task or topic, without starting the task.
 argument-hint: "<task or topic>"
 disable-model-invocation: true
 ---
 <!-- context-eng:recall -->
 
-This is a memory lookup, not an instruction to carry out the task in the arguments.
+<!-- sync:recall-intro -->
+The user wants to see what memory holds about a topic. This is a lookup, not a request to do the task: do not start it, run commands, or edit files.
+<!-- /sync:recall-intro -->
 
-Find the context-eng recall context supplied by the UserPromptSubmit hook for this prompt. Show its memories faithfully as a short list, including their category, project, and update date. Show a usage, empty-result, or error message when supplied. Then wait for the user's next instruction.
+## Get the memories
 
-Do not call memory_search, run the terminal recall command, or start changing files. The host hook has already performed retrieval. If this prompt has no context-eng recall context, tell the user to run `context-eng init --recall manual --harness claude` from a durable installation and restart Claude Code. Do not claim recall succeeded.
+The context-eng `UserPromptSubmit` hook has already searched memory and added a `<context_eng_recall>` block to this prompt. Use that block. Do not call memory_search or run `context-eng recall` yourself.
+
+If this prompt has no `<context_eng_recall>` block, the hook is not installed. Tell the user to run `context-eng init --recall manual --harness claude` from a global install and restart Claude Code. Do not claim recall worked.
+
+<!-- sync:recall-show -->
+## Show the memories
+
+- List each memory on its own line with its category, project, and last-updated date. Keep the wording faithful; do not merge or reinterpret memories.
+- If nothing matched, say that no matching memory was found.
+- If you received a usage message or an error instead, show it as it is.
+
+Then stop and wait for the user's next instruction.
+<!-- /sync:recall-show -->

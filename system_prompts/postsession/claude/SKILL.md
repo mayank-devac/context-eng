@@ -5,6 +5,8 @@ disable-model-invocation: true
 ---
 <!-- context-eng:postsession -->
 
+<!-- sync:postsession -->
 {{instructions}}
+<!-- /sync:postsession -->
 
 {{project_binding}}
