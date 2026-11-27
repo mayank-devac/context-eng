@@ -9,6 +9,7 @@ import {
   MAX_SEARCH_CATEGORIES,
 } from "./categories.js";
 import { EngineError, type Engine } from "./engine.js";
+import { memoryInstructions } from "./pointer-block.js";
 import { renderMemoryContext, retrieveMemories, type MemoryContext } from "./retrieval.js";
 import {
   TypeSafeRelevanceEvaluator,
@@ -93,14 +94,23 @@ async function handleSearch(engine: Engine, fn: () => Promise<MemoryContext>) {
   }
 }
 
+/** Memory instructions for hosts that pass MCP `instructions` to the model. Fails open. */
+function serverInstructions(): { instructions?: string } {
+  try {
+    return { instructions: memoryInstructions() };
+  } catch {
+    return {};
+  }
+}
+
 export function createServer(
   engine: Engine,
   relevanceEvaluator: RelevanceEvaluator = new TypeSafeRelevanceEvaluator(),
 ): McpServer {
-  const server = new McpServer({
-    name: "context-eng",
-    version: "0.2.0",
-  });
+  const server = new McpServer(
+    { name: "context-eng", version: "0.2.0" },
+    serverInstructions(),
+  );
 
   server.registerTool(
     "memory_search",

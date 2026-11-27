@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
-import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { MAX_HITS } from "./categories.js";
 import { Engine } from "./engine.js";
@@ -35,7 +34,7 @@ import { formatDoctor, runDoctor } from "./doctor.js";
 import { runStdio } from "./mcp.js";
 import { installOpencodeCommand, opencodeRulesFile, type OpencodeRulesFile } from "./opencode.js";
 import { resolveProjectPath } from "./paths.js";
-import { MARKER_END, MARKER_START } from "./pointer-block.js";
+import { MARKER_END, MARKER_START, memoryInstructions } from "./pointer-block.js";
 import { installPostsessionHook, parsePostsessionMode, runPostsessionHook } from "./postsession.js";
 import { renderMemoryContext, retrieveMemories } from "./retrieval.js";
 import { ensureTypeSafeKey, loadTypeSafeApiKey, openOsKeychain } from "./secrets.js";
@@ -111,27 +110,8 @@ export function upsertMarkedBlock(existing: string | null, block: string): strin
   return `${head}\n\n${unit}\n`;
 }
 
-function repoRoot(): string {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-}
-
 export function agentPointerBlock(): string {
-  const raw = readFileSync(path.join(repoRoot(), "system_prompts", "AGENTS.md"), "utf8");
-  const start = raw.indexOf(MARKER_START);
-  const end = raw.indexOf(MARKER_END);
-  const inner = start !== -1 && end !== -1 && end > start
-    ? raw.slice(start + MARKER_START.length, end)
-    : raw;
-  const adapted = inner
-    .replaceAll("memory.search", "memory_search")
-    .replaceAll("memory.create", "memory_create")
-    .replaceAll("memory.delete", "memory_delete")
-    .replaceAll("memory.edit", "memory_edit")
-    .replaceAll("memory.map", "memory_map")
-    .replaceAll("memory.promote", "memory_promote")
-    .replaceAll("memory.demote", "memory_demote")
-    .trim();
-  return `${MARKER_START}\n${adapted}\n${MARKER_END}\n`;
+  return `${MARKER_START}\n${memoryInstructions()}\n${MARKER_END}\n`;
 }
 
 function writePointer(file: string, block: string): void {

@@ -22,12 +22,30 @@ This repo is already a marketplace, so anyone can install the plugin with `claud
 
 ### Codex blockers
 
-OpenAI's public directory rejects two things this plugin needs:
+OpenAI's public directory rejects two things this plugin uses:
 
-1. **A local MCP server.** The directory only accepts remote HTTPS servers, and ours runs `node scripts/mcp.mjs`.
-2. **Lifecycle hooks.** These must be removed, and we ship `hooks/hooks.json`.
+| Blocker | Status |
+|---------|--------|
+| **Lifecycle hooks** must be removed, and we ship `hooks/hooks.json` | ✅ Solved, see below |
+| **A local MCP server.** The normal portal wants a remote HTTPS server, and ours runs `node scripts/mcp.mjs`. OpenAI sends plugins with a local server through a separate desktop-only path. | ❌ Open |
 
-Until there is a Codex build without hooks and with a hosted server, Codex users install with `codex plugin marketplace add mayank-devac/context-eng`.
+### Replacing the hook
+
+The SessionStart hook only adds the memory rules (`rules/AGENTS.md`) and the project root to the session. A build without hooks gets the same rules three other ways:
+
+```
+                 ┌─ MCP `instructions`  → sent when the server connects (src/mcp.ts)
+memory rules ────┼─ context-memory skill → loads when memory comes up
+                 └─ ~/.codex/AGENTS.md   → written by `context-eng init`
+```
+
+- **MCP `instructions`:** the server sends the rules from `system_prompts/AGENTS.md` when a client connects. Hosts that pass server instructions to the model get them without a hook.
+- **Project root:** without the hook, the server falls back to its working directory, and the agent can pass `projectPath` or call `memory_bind`.
+
+| Build | Hooks | Where |
+|-------|-------|-------|
+| Codex directory | Removed: leave `hooks/` out of the ZIP | OpenAI portal |
+| This repo's marketplace | Kept. Codex runs command hooks, and ours is one | `codex plugin marketplace add mayank-devac/context-eng` |
 
 ## After you are listed
 

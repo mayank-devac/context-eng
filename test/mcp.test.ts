@@ -112,6 +112,13 @@ describe("MCP stdio server end to end", { timeout: 60_000 }, () => {
     rmSync(project, { recursive: true, force: true });
   });
 
+  it("sends the memory instructions on connect, so hosts without hooks still get them", () => {
+    const instructions = client.getInstructions() ?? "";
+    expect(instructions).toContain("## Memory (context-eng)");
+    expect(instructions).toContain("memory_search");
+    expect(instructions).not.toContain("<!-- context-eng:start -->");
+  });
+
   it("advertises the memory tools and accepts search without categories", async () => {
     const { tools } = await client.listTools();
     expect(tools.map((tool) => tool.name).sort()).toEqual([
