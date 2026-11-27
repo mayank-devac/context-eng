@@ -1,6 +1,16 @@
 # context-eng 
 
-Local project memory router for Codex, Claude Code, Cursor, and OpenCode. Memories live in one SQLite database per each category, with SQLite FTS5 for local retrieval and TypeSafe Jev filtering for semantic relevance.
+Local project memory router for Codex, Claude Code, Cursor, OpenCode, and Antigravity. Memories live in one SQLite database per each category, with SQLite FTS5 for local retrieval and TypeSafe Jev filtering for semantic relevance.
+
+## Install with your agent
+
+Copy this into your coding agent's prompt:
+
+```text
+Install the context-eng memory plugin from https://github.com/mayank-devac/context-eng. Follow the "For agents" steps in the repo's INSTALL.md.
+```
+
+Or follow [INSTALL.md](INSTALL.md) yourself. It covers the plugin for Claude Code, Codex, Cursor, Antigravity (`agy`), and OpenCode, and the npm + `context-eng init` route below.
 
 ## Use
 
@@ -533,6 +543,41 @@ On first open, existing single-database memories are copied into staged category
 
 Category names are Unicode-normalized and case-insensitive for lookup. Safe slug-and-hash filenames prevent a category name from becoming a filesystem path. If at least 80% of a new name matches a built-in or same-scope registered category after separators are removed, `memory_create` or a category-changing `memory_edit` returns `NEAR_CATEGORY` without writing. Separator-only variants such as `batch-probe` and `batch_probe` are also treated as matches. The agent can use the suggested category or make a second call with `confirmNewCategory: true`. Built-in categories keep their existing auto-promotion behavior; custom categories have no rename or delete lifecycle in this version.
 
+## Plugin
+
+[`plugins/context-eng/`](plugins/context-eng/README.md) is one plugin folder for Claude Code, Codex, Cursor, Antigravity, and OpenCode. It ships the MCP server (through `scripts/mcp.mjs`, which prefers your global install and falls back to `npx`), the always-on memory instructions, and the `recall`, `postsession`, and `context-memory` skills. The repo root holds its marketplaces: `.claude-plugin/marketplace.json` (Claude Code), `.agents/plugins/marketplace.json` (Codex), and `.cursor-plugin/marketplace.json` (Cursor).
+
+Use the plugin **or** `context-eng init`'s MCP setup for an app, not both, or the agent sees every memory tool twice. Install steps: [INSTALL.md](INSTALL.md).
+
+```bash
+npm run validate:plugins
+```
+
+checks every manifest, MCP config, hook, skill, rule, and version, and runs `claude plugin validate` / `agy plugin validate` when installed. To try the plugin from a checkout without installing it: `claude --plugin-dir plugins/context-eng`.
+
+## Prompt files
+
+The same prompt text lives in several files, one per host. `scripts/sync-prompts.mjs` keeps each shared piece identical:
+
+| Shared text | Files |
+|---|---|
+| Instructions block (`<!-- context-eng:start -->` … `end`) | `system_prompts/AGENTS.md` (what `init` writes), `system_prompts/CLAUDE.md`, root `AGENTS.md` and `CLAUDE.md`, `.cursor/rules/context-eng-memory.mdc`, `plugins/context-eng/rules/AGENTS.md` and `context-eng.mdc` |
+| Recall (`<!-- sync:recall-intro -->`, `<!-- sync:recall-show -->` regions) | `system_prompts/recall/{claude,codex}/SKILL.md`, `system_prompts/recall/opencode/recall.md`, the plugin's and `.agents/` recall skills |
+| Postsession instructions | `system_prompts/postsession.md` and the `<!-- sync:postsession -->` region of the plugin's and `.agents/` postsession skills |
+| Postsession host templates | the bodies of `system_prompts/postsession/{claude,codex,opencode}/` |
+| Memory tool contract | `system_prompts/rules.md` and the plugin's `skills/context-memory/references/rules.md` |
+| Memory skill | `.agent/SKILL.md` and the plugin's `skills/context-memory/SKILL.md` |
+
+Edit **any one** copy and commit. The pre-commit hook (`.githooks/pre-commit`, enabled by `npm install` through the `prepare` script) finds the copy you changed, writes its text into every other copy, stages them, and then validates the plugin. Text outside the shared part, such as frontmatter or host-specific steps, is left alone.
+
+```bash
+npm run sync:prompts                                   # sync now, without committing
+npm run check:prompts                                  # report drift only (exit 1 if any)
+node scripts/sync-prompts.mjs --from CLAUDE.md         # force one file as the source
+```
+
+If two copies were edited differently, or a copy has unstaged edits, the hook stops and says which files to fix.
+
 ## Checks
 
 ```bash
@@ -540,6 +585,8 @@ npm test
 npm run typecheck
 npm run typecheck:test
 npm run lint
+npm run check:prompts
+npm run validate:plugins
 ```
 
 ## Release
@@ -553,11 +600,13 @@ npm run release -- minor     # or major, or an exact version like 0.2.0
 
 1. Checks the npm login and the `master` branch, and asks before including uncommitted changes.
 2. Runs `npm ci`, lint, both typechecks, and the tests.
-3. Bumps the version in `package.json`, `package-lock.json`, and `src/mcp.ts`, builds, and shows the package contents.
+3. Bumps the version in `package.json`, `package-lock.json`, `src/mcp.ts`, the plugin manifests, and the Claude Code marketplace entry, checks the plugin, builds, and shows the package contents.
 4. Asks for confirmation, then commits `Release <version>`, tags `v<version>`, runs `npm publish`, and pushes the commit and tag.
 5. Installs the new version on this machine (the same steps as `npm run update-device`).
 
 ## Related docs
 
-- [Memory tool rules](system_prompts/rules.md) — agent contract for bind, search, write, promote, and delete
+- [INSTALL.md](INSTALL.md): install steps for every app, plus the procedure agents follow
+- [Plugin README](plugins/context-eng/README.md): what the plugin gives each app and how to test it
+- [Memory tool rules](system_prompts/rules.md): agent contract for bind, search, write, promote, and delete
 

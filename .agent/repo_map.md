@@ -107,3 +107,21 @@
   - Use: Sends plain content strings to Jev in 30-context batches, scores the first 90 ordered candidates, and applies the final result budget.
   - Useful/used by: `mcp.ts` checks evaluator availability and falls back locally on failure; tests can inject a custom evaluator.
   - Contains: API-key availability, 20-second request cancellation, a 90-candidate slice with a too-large message when hits survive, minimal Jev state, response validation, the strict `0.5` gate, explicit sorting, and 50-hit/4000-token budgeting.
+
+# Outside `src/`
+
+- `plugins/context-eng/`:
+  - Use: One plugin folder for Claude Code, Codex, Cursor, Antigravity, and OpenCode; see its README.
+  - Contains: One manifest per host (`.claude-plugin/`, `.codex-plugin/`, `.cursor-plugin/`, `.antigravity-plugin/`, `package.json` + `server.js`), MCP configs (`.mcp.json`, `mcp.json`, `mcp_config.json`, inline for Cursor), `hooks/hooks.json` (SessionStart for Claude Code and Codex), `rules/` (always-on instructions), `skills/` (`recall`, `postsession`, `context-memory`), `scripts/mcp.mjs` (server launcher), `scripts/session-start.mjs`, and `opencode/plugin.mjs` (OpenCode 1.x `server()` and 2.x `setup()`).
+  - Marketplaces at the repo root: `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`, `.cursor-plugin/marketplace.json`.
+
+- `scripts/sync-prompts.mjs`:
+  - Use: Keeps shared prompt text identical across `system_prompts/`, root `AGENTS.md`/`CLAUDE.md`, `.cursor/`, `.agents/`, `.agent/`, and the plugin. The copy changed since HEAD is the source.
+  - Useful/used by: `.githooks/pre-commit` (`--stage`), `npm run sync:prompts` / `check:prompts`, `test/sync-prompts.test.ts`.
+  - Contains: The `GROUPS` table (which files share which part: marker block, `<!-- sync:NAME -->` region, frontmatter body, or whole file), extract/replace helpers, and source detection with `--from` override.
+
+- `scripts/validate-plugins.mjs`:
+  - Use: Offline checks of every plugin manifest, MCP config, hook, skill, rule, marketplace entry, and version; `--cli` also runs `claude plugin validate` and `agy plugin validate` when installed.
+  - Useful/used by: `.githooks/pre-commit`, `npm run validate:plugins`, `scripts/release.sh`, `test/plugin.test.ts`.
+
+- `scripts/install-git-hooks.mjs`: npm `prepare` step that sets `core.hooksPath` to `.githooks` in a git checkout, unless another hooks path is already set.

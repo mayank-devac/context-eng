@@ -21,3 +21,8 @@ You have a memory of past work in this and other repositories: decisions, mistak
 New `preference` and `workflow` memories, and memories in custom categories, start in staging: hidden from search until promoted.
 <!-- context-eng:end -->
 
+## Working in this repository
+
+- Install and setup for users: `INSTALL.md` (it has a "For agents" procedure). Plugin layout: `plugins/context-eng/README.md`. Source map: `.agent/repo_map.md`.
+- Prompt text is shared across hosts. Edit one copy (for example `system_prompts/AGENTS.md`, this file's context-eng block, or a recall skill) and the pre-commit hook copies it to the rest; `npm run check:prompts` reports drift. The list of shared files is in the README's "Prompt files" section.
+- Before calling work done: `npm test`, `npm run typecheck`, `npm run typecheck:test`, `npm run lint`, and `npm run validate:plugins` when plugin files changed.
