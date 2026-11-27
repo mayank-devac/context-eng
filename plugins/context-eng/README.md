@@ -69,3 +69,7 @@ npm run validate:plugins
 ## Editing
 
 The instructions, recall, postsession, and memory-contract text here are copies of files in `system_prompts/`. Edit any copy and commit: the pre-commit hook (`scripts/sync-prompts.mjs`) copies your change to every other copy. See the main README's "Prompt files" section.
+
+## Publishing
+
+To list the plugin in each host's official directory, follow the checklist in [PUBLISHING.md](../../PUBLISHING.md).
